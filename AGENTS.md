@@ -10,6 +10,7 @@ This repo packages a modified `proxyt` server into an Android app for local hots
 4. Verify locally before pushing.
 5. Push the branch and open or update a PR against `main`.
 6. If `origin/main` moves, fetch, rebase the branch onto `origin/main`, and force-push with lease.
+7. Do not merge `main` or `origin/main` into a task branch. Keep PR branches linear by rebasing only.
 
 ## Branch And Worktree Pattern
 - Prefer branch names like `codex/<topic>-<date>` or another short task-specific name.
@@ -31,6 +32,8 @@ git fetch origin main
 git rebase origin/main
 git push --force-with-lease origin <branch>
 ```
+
+Do not use merge-based update flows such as `git merge origin/main` on a task branch.
 
 ## Android Build Requirements
 - Use JDK 17 for Gradle:
@@ -76,6 +79,8 @@ Useful checks:
 ## PR Workflow
 - Push the task branch to `origin`.
 - Open a PR against `main`.
+- If the PR goes stale or shows conflicts, fetch `origin/main`, rebase the branch onto it, and `git push --force-with-lease`.
+- Never resolve PR drift by merging `main` into the branch.
 - Include:
   - a short summary
   - verification commands actually run

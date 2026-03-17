@@ -66,6 +66,18 @@ resolve_adb() {
 main() {
   ensure_local_properties
 
+  if java -version 2>&1 | grep -qi "graalvm"; then
+    cat <<'EOF'
+This project should be built with a standard JDK 17 distribution.
+
+GraalVM breaks Android Gradle Plugin's jlink path on this repo.
+Set JAVA_HOME to a standard JDK 17 install, for example:
+
+  export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+EOF
+    exit 1
+  fi
+
   local adb_bin
   adb_bin="$(resolve_adb || true)"
   if [[ -z "$adb_bin" ]]; then
@@ -94,7 +106,6 @@ EOF
     exit 1
   fi
 
-  "$ROOT_DIR/scripts/build-android-binary.sh"
   (
     cd "$ROOT_DIR"
     ./gradlew :app:installDebug

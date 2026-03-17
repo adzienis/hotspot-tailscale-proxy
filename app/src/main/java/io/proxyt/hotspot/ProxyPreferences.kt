@@ -9,11 +9,29 @@ data class ProxyConfig(
     val debug: Boolean = false,
 )
 
+enum class ProxyErrorCategory {
+    NONE,
+    MISSING_BINARY,
+    INVALID_CONFIG,
+    PORT_IN_USE,
+    PROXY_EXIT,
+    PERMISSION_REQUIRED,
+    STARTUP_FAILURE,
+}
+
+data class ProxyErrorInfo(
+    val category: ProxyErrorCategory,
+    val title: String,
+    val detail: String,
+    val recommendedAction: String,
+)
+
 data class ProxyStatus(
     val running: Boolean,
     val activeUrl: String,
     val lastExitCode: Int?,
     val message: String,
+    val error: ProxyErrorInfo?,
 )
 
 object ProxyPreferences {
@@ -25,6 +43,10 @@ object ProxyPreferences {
     private const val KEY_ACTIVE_URL = "active_url"
     private const val KEY_LAST_EXIT_CODE = "last_exit_code"
     private const val KEY_MESSAGE = "message"
+    private const val KEY_ERROR_CATEGORY = "error_category"
+    private const val KEY_ERROR_TITLE = "error_title"
+    private const val KEY_ERROR_DETAIL = "error_detail"
+    private const val KEY_ERROR_ACTION = "error_action"
 
     fun loadConfig(context: Context): ProxyConfig {
         val preferences = preferences(context)
@@ -54,6 +76,7 @@ object ProxyPreferences {
                 null
             },
             message = preferences.getString(KEY_MESSAGE, "Proxy idle").orEmpty(),
+            error = readError(preferences),
         )
     }
 
@@ -63,6 +86,7 @@ object ProxyPreferences {
         activeUrl: String,
         lastExitCode: Int?,
         message: String,
+        error: ProxyErrorInfo? = null,
     ) {
         val editor = preferences(context).edit()
             .putBoolean(KEY_RUNNING, running)
@@ -73,6 +97,18 @@ object ProxyPreferences {
             editor.remove(KEY_LAST_EXIT_CODE)
         } else {
             editor.putInt(KEY_LAST_EXIT_CODE, lastExitCode)
+        }
+
+        if (error == null || error.category == ProxyErrorCategory.NONE) {
+            editor.remove(KEY_ERROR_CATEGORY)
+            editor.remove(KEY_ERROR_TITLE)
+            editor.remove(KEY_ERROR_DETAIL)
+            editor.remove(KEY_ERROR_ACTION)
+        } else {
+            editor.putString(KEY_ERROR_CATEGORY, error.category.name)
+            editor.putString(KEY_ERROR_TITLE, error.title)
+            editor.putString(KEY_ERROR_DETAIL, error.detail)
+            editor.putString(KEY_ERROR_ACTION, error.recommendedAction)
         }
 
         editor.apply()
@@ -92,6 +128,29 @@ object ProxyPreferences {
 
     fun clearLogs(context: Context) {
         logFile(context).writeText("")
+    }
+
+    private fun readError(preferences: android.content.SharedPreferences): ProxyErrorInfo? {
+        val categoryName = preferences.getString(KEY_ERROR_CATEGORY, null) ?: return null
+        val category = ProxyErrorCategory.entries.firstOrNull { it.name == categoryName }
+            ?: ProxyErrorCategory.STARTUP_FAILURE
+        if (category == ProxyErrorCategory.NONE) {
+            return null
+        }
+
+        val title = preferences.getString(KEY_ERROR_TITLE, "").orEmpty()
+        val detail = preferences.getString(KEY_ERROR_DETAIL, "").orEmpty()
+        val recommendedAction = preferences.getString(KEY_ERROR_ACTION, "").orEmpty()
+        if (title.isBlank() && detail.isBlank() && recommendedAction.isBlank()) {
+            return null
+        }
+
+        return ProxyErrorInfo(
+            category = category,
+            title = title,
+            detail = detail,
+            recommendedAction = recommendedAction,
+        )
     }
 
     private fun preferences(context: Context) =

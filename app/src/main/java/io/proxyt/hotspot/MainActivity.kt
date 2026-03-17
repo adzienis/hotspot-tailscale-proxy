@@ -1,12 +1,15 @@
 package io.proxyt.hotspot
 
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -16,7 +19,13 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var statusView: TextView
+    private lateinit var stateView: TextView
+    private lateinit var statusMessageView: TextView
+    private lateinit var statusUrlView: TextView
+    private lateinit var errorCategoryView: TextView
+    private lateinit var lastFailureView: TextView
+    private lateinit var lastExitCodeView: TextView
+    private lateinit var nextActionView: TextView
     private lateinit var detectedAddressView: TextView
     private lateinit var logView: TextView
     private lateinit var portEdit: TextInputEditText
@@ -24,8 +33,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var debugSwitch: MaterialCheckBox
     private lateinit var startButton: MaterialButton
     private lateinit var stopButton: MaterialButton
+    private lateinit var copyLastErrorButton: MaterialButton
 
     private val refreshHandler = Handler(Looper.getMainLooper())
+    private var latestStatus: ProxyStatus? = null
     private val refreshRunnable = object : Runnable {
         override fun run() {
             renderStatus()
@@ -45,7 +56,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusView = findViewById(R.id.statusText)
+        stateView = findViewById(R.id.stateValueText)
+        statusMessageView = findViewById(R.id.statusMessageText)
+        statusUrlView = findViewById(R.id.statusUrlText)
+        errorCategoryView = findViewById(R.id.errorCategoryText)
+        lastFailureView = findViewById(R.id.lastFailureText)
+        lastExitCodeView = findViewById(R.id.lastExitCodeText)
+        nextActionView = findViewById(R.id.nextActionText)
         detectedAddressView = findViewById(R.id.detectedAddressText)
         logView = findViewById(R.id.logText)
         portEdit = findViewById(R.id.portEdit)
@@ -53,6 +70,7 @@ class MainActivity : AppCompatActivity() {
         debugSwitch = findViewById(R.id.debugSwitch)
         startButton = findViewById(R.id.startButton)
         stopButton = findViewById(R.id.stopButton)
+        copyLastErrorButton = findViewById(R.id.copyLastErrorButton)
 
         val config = ProxyPreferences.loadConfig(this)
         portEdit.setText(config.port.toString())
@@ -78,6 +96,27 @@ class MainActivity : AppCompatActivity() {
             ProxyPreferences.clearLogs(this)
             renderLogs()
             Toast.makeText(this, "Logs cleared", Toast.LENGTH_SHORT).show()
+        }
+
+        copyLastErrorButton.setOnClickListener {
+            val status = latestStatus
+            val error = status?.error ?: return@setOnClickListener
+            val clipboard = getSystemService(ClipboardManager::class.java)
+            val content = buildString {
+                append(error.title)
+                append('\n')
+                append(error.detail)
+                if (status.lastExitCode != null) {
+                    append("\nExit code: ")
+                    append(status.lastExitCode)
+                }
+                if (error.recommendedAction.isNotBlank()) {
+                    append("\nRecommended action: ")
+                    append(error.recommendedAction)
+                }
+            }
+            clipboard.setPrimaryClip(ClipData.newPlainText("Proxy last error", content))
+            Toast.makeText(this, R.string.last_error_copied, Toast.LENGTH_SHORT).show()
         }
 
         startButton.setOnClickListener {
@@ -152,21 +191,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         val status = ProxyPreferences.readStatus(this)
-        statusView.text = buildString {
-            append(if (status.running) "Running" else "Stopped")
-            if (status.activeUrl.isNotBlank()) {
-                append("\n")
-                append(status.activeUrl)
-            }
-            if (status.message.isNotBlank()) {
-                append("\n")
-                append(status.message)
-            }
-            if (!status.running && status.lastExitCode != null) {
-                append("\nExit code: ")
-                append(status.lastExitCode)
-            }
-        }
+        latestStatus = status
+
+        stateView.text = getString(if (status.running) R.string.state_running else R.string.state_stopped)
+        statusMessageView.text = status.message
+        statusUrlView.text = status.activeUrl.ifBlank { getString(R.string.no_active_url) }
+        errorCategoryView.text = status.error?.let(::errorLabel) ?: getString(R.string.error_state_healthy)
+        errorCategoryView.setTextColor(ContextCompat.getColor(this, errorColor(status.error?.category)))
+        lastFailureView.text = status.error?.detail ?: getString(R.string.no_failure_recorded)
+        lastExitCodeView.text = status.lastExitCode?.toString() ?: getString(R.string.no_exit_code)
+        nextActionView.text = status.error?.recommendedAction ?: defaultRecommendedAction(status)
+        copyLastErrorButton.visibility = if (status.error == null) View.GONE else View.VISIBLE
 
         startButton.isEnabled = !status.running
         stopButton.isEnabled = status.running
@@ -175,4 +210,33 @@ class MainActivity : AppCompatActivity() {
     private fun renderLogs() {
         logView.text = ProxyPreferences.readLogTail(this)
     }
+
+    private fun errorLabel(error: ProxyErrorInfo): String =
+        when (error.category) {
+            ProxyErrorCategory.MISSING_BINARY -> getString(R.string.error_state_missing_binary)
+            ProxyErrorCategory.INVALID_CONFIG -> getString(R.string.error_state_invalid_config)
+            ProxyErrorCategory.PORT_IN_USE -> getString(R.string.error_state_port_in_use)
+            ProxyErrorCategory.PROXY_EXIT -> getString(R.string.error_state_proxy_exit)
+            ProxyErrorCategory.PERMISSION_REQUIRED -> getString(R.string.error_state_permission)
+            ProxyErrorCategory.STARTUP_FAILURE -> getString(R.string.error_state_startup_failure)
+            ProxyErrorCategory.NONE -> getString(R.string.error_state_healthy)
+        }
+
+    private fun errorColor(category: ProxyErrorCategory?): Int =
+        when (category) {
+            null, ProxyErrorCategory.NONE -> R.color.proxy_success
+            ProxyErrorCategory.INVALID_CONFIG -> R.color.proxy_warning
+            ProxyErrorCategory.PERMISSION_REQUIRED -> R.color.proxy_warning
+            ProxyErrorCategory.PORT_IN_USE -> R.color.proxy_error
+            ProxyErrorCategory.MISSING_BINARY -> R.color.proxy_error
+            ProxyErrorCategory.PROXY_EXIT -> R.color.proxy_error
+            ProxyErrorCategory.STARTUP_FAILURE -> R.color.proxy_error
+        }
+
+    private fun defaultRecommendedAction(status: ProxyStatus): String =
+        if (status.running) {
+            getString(R.string.next_action_running)
+        } else {
+            getString(R.string.next_action_idle)
+        }
 }

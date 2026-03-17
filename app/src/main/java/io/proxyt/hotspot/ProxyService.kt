@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -59,14 +60,37 @@ class ProxyService : Service() {
         val binary = File(applicationInfo.nativeLibraryDir, NATIVE_BINARY)
         binary.setExecutable(true, true)
         if (!binary.exists()) {
+            val error = ProxyErrorInfo(
+                category = ProxyErrorCategory.MISSING_BINARY,
+                title = "Bundled binary missing",
+                detail = "The app could not find ${binary.absolutePath}.",
+                recommendedAction = "Reinstall the app or rebuild it with the bundled native library included.",
+            )
             ProxyPreferences.setStatus(
                 context = this,
                 running = false,
                 activeUrl = resolvedBaseUrl,
                 lastExitCode = null,
-                message = "Missing bundled binary: ${binary.absolutePath}",
+                message = error.title,
+                error = error,
             )
             refreshNotification("Bundled proxy binary missing")
+            sendStatusBroadcast()
+            stopSelf()
+            return
+        }
+
+        val configError = validateConfig(config)
+        if (configError != null) {
+            ProxyPreferences.setStatus(
+                context = this,
+                running = false,
+                activeUrl = resolvedBaseUrl,
+                lastExitCode = null,
+                message = configError.title,
+                error = configError,
+            )
+            refreshNotification(configError.title)
             sendStatusBroadcast()
             stopSelf()
             return
@@ -104,6 +128,7 @@ class ProxyService : Service() {
                 activeUrl = resolvedBaseUrl,
                 lastExitCode = null,
                 message = "Serving on $resolvedBaseUrl",
+                error = null,
             )
             refreshNotification("Serving $resolvedBaseUrl")
             sendStatusBroadcast()
@@ -114,10 +139,19 @@ class ProxyService : Service() {
                     process = null
                 }
 
+                val error = if (stopRequested) {
+                    null
+                } else {
+                    classifyProcessFailure(
+                        detail = "Proxy exited with code $exitCode.",
+                        exitCode = exitCode,
+                        logTail = ProxyPreferences.readLogTail(this, 4_000),
+                    )
+                }
                 val message = if (stopRequested) {
                     "Proxy stopped"
                 } else {
-                    "Proxy exited with code $exitCode"
+                    error?.title ?: "Proxy exited with code $exitCode"
                 }
                 ProxyPreferences.setStatus(
                     context = this,
@@ -125,6 +159,7 @@ class ProxyService : Service() {
                     activeUrl = resolvedBaseUrl,
                     lastExitCode = exitCode,
                     message = message,
+                    error = error,
                 )
                 refreshNotification(message)
                 sendStatusBroadcast()
@@ -132,12 +167,17 @@ class ProxyService : Service() {
             }
         } catch (exception: Exception) {
             process = null
+            val error = classifyProcessFailure(
+                detail = exception.message ?: "Unknown startup error.",
+                logTail = ProxyPreferences.readLogTail(this, 4_000),
+            )
             ProxyPreferences.setStatus(
                 context = this,
                 running = false,
                 activeUrl = resolvedBaseUrl,
                 lastExitCode = null,
-                message = "Failed to start proxy: ${exception.message ?: "unknown error"}",
+                message = error.title,
+                error = error,
             )
             refreshNotification("Failed to start proxy")
             sendStatusBroadcast()
@@ -181,6 +221,88 @@ class ProxyService : Service() {
 
         val address = HotspotAddressDetector.detectPrivateIpv4() ?: DEFAULT_HOTSPOT_IP
         return "http://$address:${config.port}"
+    }
+
+    private fun validateConfig(config: ProxyConfig): ProxyErrorInfo? {
+        if (config.port !in 1..65535) {
+            return ProxyErrorInfo(
+                category = ProxyErrorCategory.INVALID_CONFIG,
+                title = "Invalid configuration",
+                detail = "Port ${config.port} is outside the valid range of 1 to 65535.",
+                recommendedAction = "Enter a listen port between 1 and 65535, then try again.",
+            )
+        }
+
+        val advertisedBaseUrl = config.advertisedBaseUrl
+        if (advertisedBaseUrl.isBlank()) {
+            return null
+        }
+
+        val uri = Uri.parse(advertisedBaseUrl)
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host
+        if ((scheme != "http" && scheme != "https") || host.isNullOrBlank()) {
+            return ProxyErrorInfo(
+                category = ProxyErrorCategory.INVALID_CONFIG,
+                title = "Invalid configuration",
+                detail = "Advertised URL must be a full http:// or https:// URL with a host.",
+                recommendedAction = "Fix the advertised base URL or clear it to use the detected hotspot address.",
+            )
+        }
+
+        return null
+    }
+
+    private fun classifyProcessFailure(
+        detail: String,
+        exitCode: Int? = null,
+        logTail: String = "",
+    ): ProxyErrorInfo {
+        val combined = buildString {
+            append(detail)
+            if (logTail.isNotBlank()) {
+                append('\n')
+                append(logTail)
+            }
+        }.lowercase()
+
+        return when {
+            "address already in use" in combined || "bind" in combined || "port already in use" in combined -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.PORT_IN_USE,
+                    title = "Port is already in use",
+                    detail = "Another process is already bound to the selected port.",
+                    recommendedAction = "Choose a different listen port or stop the app that is already using this port.",
+                )
+            }
+
+            "permission denied" in combined || "operation not permitted" in combined || "not allowed" in combined -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.PERMISSION_REQUIRED,
+                    title = "Permission issue",
+                    detail = "Android or the proxy process denied access needed to start cleanly.",
+                    recommendedAction = "Grant the required permission or choose a different port, then try starting the proxy again.",
+                )
+            }
+
+            exitCode != null -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.PROXY_EXIT,
+                    title = "Proxy process exited",
+                    detail = "The bundled proxy exited with code $exitCode.",
+                    recommendedAction = "Retry once. If it exits again, copy the last error and inspect the logs for more detail.",
+                )
+            }
+
+            else -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.STARTUP_FAILURE,
+                    title = "Proxy failed to start",
+                    detail = detail,
+                    recommendedAction = "Try again. If the problem repeats, copy the last error and inspect the logs.",
+                )
+            }
+        }
     }
 
     private fun sendStatusBroadcast() {

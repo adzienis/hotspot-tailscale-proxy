@@ -10,9 +10,11 @@ This repo packages a modified `proxyt` server into an Android app for local hots
 4. Create a dedicated git worktree for that branch.
 5. Make changes inside that worktree only.
 6. Verify locally before pushing.
-7. Push the branch and open or update a PR against `main`.
-8. If `origin/main` moves, fetch, rebase the branch onto `origin/main`, and force-push with lease.
-9. Do not merge `main` or `origin/main` into a task branch. Keep PR branches linear by rebasing only.
+7. When implementation is complete, push the branch and open or update a PR against `main` immediately.
+8. Continue monitoring the PR until all checks finish green, and keep working on the same branch until they do.
+9. If more work is needed later, continue on the same branch and update the existing PR rather than starting a second branch or PR for the same worktree.
+10. If `origin/main` moves, fetch, rebase the branch onto `origin/main`, and force-push with lease.
+11. Do not merge `main` or `origin/main` into a task branch. Keep PR branches linear by rebasing only.
 
 ## Branch And Worktree Pattern
 - Prefer branch names like `codex/<topic>-<date>` or another short task-specific name.
@@ -80,8 +82,9 @@ Useful checks:
 ```
 
 ## PR Workflow
-- Push the task branch to `origin`.
-- Open a PR against `main`.
+- Once implementation in a worktree is done, push the task branch to `origin` and open or update its PR against `main` right away.
+- Keep watching the PR checks until they all complete successfully. If a check fails, keep iterating on the same branch and PR until the full check set is green.
+- If you return to the same worktree later, keep committing on the same branch and update the same PR until that worktree is merged or abandoned.
 - If the PR goes stale or shows conflicts, fetch `origin/main`, rebase the branch onto it, and `git push --force-with-lease`.
 - Never resolve PR drift by merging `main` into the branch.
 - GitHub also runs `.github/workflows/pr-auto-rebase.yml` after pushes to `main` to rebase stale same-repo PR branches automatically. That workflow must use the `PR_AUTOREBASE_TOKEN` secret so its force-pushes trigger the normal PR checks. Fork PRs are skipped, and conflicted rebases still require a local manual rebase.

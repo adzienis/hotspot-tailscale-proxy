@@ -86,7 +86,7 @@ data class HotspotRuntimeDependencies(
                     override fun nowMs(): Long = System.currentTimeMillis()
                 },
                 localAddressProvider = object : LocalAddressProvider {
-                    override fun detectCandidates(): List<HotspotAddressCandidate> = HotspotAddressDetector.detectCandidates()
+                    override fun detectCandidates(): List<HotspotAddressCandidate> = HotspotAddressDetector.detectCandidates(context)
                 },
                 statusStore = SharedPreferencesProxyStatusStore(context),
             )

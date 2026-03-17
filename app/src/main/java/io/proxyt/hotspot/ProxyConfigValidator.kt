@@ -86,18 +86,28 @@ object ProxyConfigValidator {
     }
 
     fun resolveEffectiveUrl(config: ProxyConfig, localCandidates: List<HotspotAddressCandidate>): String {
-        val selectedLocalAddress = config.selectedLocalAddress.trim()
         if (config.advertisedBaseUrl.isNotBlank()) {
             return normalizeAdvertisedBaseUrl(config.advertisedBaseUrl)
                 ?: throw IllegalArgumentException("Advertised base URL must be a valid http:// or https:// URL with a host")
         }
 
-        val candidateAddress = when {
-            selectedLocalAddress.isNotBlank() -> selectedLocalAddress
-            localCandidates.isNotEmpty() -> localCandidates.first().address
-            else -> DEFAULT_HOTSPOT_IP
-        }
+        val candidateAddress = resolveSelectedLocalAddress(config, localCandidates)
+            .ifBlank { DEFAULT_HOTSPOT_IP }
         return buildLocalUrl(candidateAddress, config.port)
+    }
+
+    fun resolveSelectedLocalAddress(config: ProxyConfig, localCandidates: List<HotspotAddressCandidate>): String {
+        val selectedLocalAddress = config.selectedLocalAddress.trim()
+        if (config.advertisedBaseUrl.isNotBlank()) {
+            return selectedLocalAddress
+        }
+
+        val availableAddresses = localCandidates.map { it.address }.toSet()
+        return when {
+            selectedLocalAddress.isNotBlank() && selectedLocalAddress in availableAddresses -> selectedLocalAddress
+            localCandidates.isNotEmpty() -> localCandidates.first().address
+            else -> ""
+        }
     }
 
     fun normalizeAdvertisedBaseUrl(raw: String): String? {

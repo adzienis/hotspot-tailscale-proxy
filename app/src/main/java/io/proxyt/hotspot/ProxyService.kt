@@ -466,11 +466,7 @@ class ProxyService : Service() {
         localCandidates: List<HotspotAddressCandidate>,
     ): ResolvedEndpoint {
         val activeUrl = ProxyConfigValidator.resolveEffectiveUrl(config, localCandidates)
-        val selectedIp = when {
-            config.advertisedBaseUrl.isNotBlank() -> ""
-            config.selectedLocalAddress.isNotBlank() -> config.selectedLocalAddress
-            else -> localCandidates.firstOrNull()?.address.orEmpty()
-        }
+        val selectedIp = ProxyConfigValidator.resolveSelectedLocalAddress(config, localCandidates)
         val selectedInterface = localCandidates.firstOrNull { it.address == selectedIp }?.interfaceName.orEmpty()
         val selectedInterfaceKind = localCandidates.firstOrNull { it.address == selectedIp }?.kind.orEmpty()
         val hotspotActive = localCandidates.any { it.kind == "Hotspot" || it.kind == "USB tethering" }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HotspotProxy" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/proxy_primary</item>
+        <item name="colorPrimaryVariant">@color/proxy_primary_dark</item>
+        <item name="colorSecondary">@color/proxy_accent</item>
+        <item name="colorSecondaryVariant">@color/proxy_accent</item>
+        <item name="colorSurface">@color/proxy_surface</item>
+        <item name="android:statusBarColor">@color/proxy_surface</item>
+        <item name="android:windowBackground">@color/proxy_surface</item>
+    </style>
+</resources>

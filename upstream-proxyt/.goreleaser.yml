@@ -1,0 +1,79 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: proxyt
+    goos:   [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -X github.com/jaxxstorm/proxyt/cmd.Version={{ .Version }}
+
+archives:
+  - id: default
+    builds: [proxyt]
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE*]
+    format_overrides:
+      - goos: windows
+        format: zip
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+kos:
+  - id: proxyt
+    build: proxyt
+    main: .
+    base_image: gcr.io/distroless/static-debian12:nonroot
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    repository: ghcr.io/jaxxstorm/proxyt
+    tags:
+      - latest
+      - "{{ .Tag }}"
+    bare: true
+    preserve_import_paths: false
+    base_import_paths: false
+    labels:
+      "org.opencontainers.image.title": "{{ .ProjectName }}"
+      "org.opencontainers.image.description": "Tailscale login server proxy"
+      "org.opencontainers.image.url": "https://github.com/jaxxstorm/proxyt"
+      "org.opencontainers.image.source": "https://github.com/jaxxstorm/proxyt"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.created": "{{ time \"2006-01-02T15:04:05Z07:00\" }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.licenses": "MIT"
+    creation_time: "{{ .CommitTimestamp }}"
+    sbom: none
+
+brews:
+  - name: proxyt
+    repository:
+      owner: jaxxstorm
+      name: homebrew-tap
+    commit_author:
+      name:  GitHub Actions
+      email: bot@leebriggs.co.uk
+    directory: Formula
+    description: Easily proxy the Tailscale login API for blocked networks.
+    homepage: https://github.com/jaxxstorm/proxyt
+
+scoops:
+  - name: proxyt
+    repository:
+      owner: jaxxstorm
+      name: scoop-bucket
+    commit_author:
+      name:  GitHub Actions
+      email: bot@leebriggs.co.uk
+    description: Easily proxy the Tailscale login API for blocked networks.
+    homepage: https://github.com/jaxxstorm/proxyt

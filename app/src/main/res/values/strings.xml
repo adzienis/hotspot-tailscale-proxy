@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hotspot ProxyT</string>
+    <string name="subtitle">Run a local ProxyT instance on Android and advertise it over the phone’s private hotspot IP.</string>
+    <string name="listen_port">Listen port</string>
+    <string name="advertised_url">Advertised base URL</string>
+    <string name="debug_switch">Enable verbose proxy logs</string>
+    <string name="use_detected_ip">Use detected IP</string>
+    <string name="refresh_logs">Refresh logs</string>
+    <string name="start_proxy">Start proxy</string>
+    <string name="stop_proxy">Stop proxy</string>
+    <string name="usage_notes">Point the iPhone Tailscale client at the advertised URL shown above. For hotspot-only use, this should usually be an RFC1918 address like http://192.168.43.1:8080.</string>
+    <string name="detected_address_missing">No private hotspot/LAN IPv4 address detected yet. You can still enter the advertised URL manually.</string>
+    <string name="detected_address_value">Detected private IPv4: %1$s\nSuggested control URL: http://%1$s:%2$s</string>
+</resources>

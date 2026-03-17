@@ -3,4 +3,6 @@
 /local.properties
 /app/build/
 /build/
+/buildSrc/.gradle/
+/buildSrc/build/
 /tailscale-src/

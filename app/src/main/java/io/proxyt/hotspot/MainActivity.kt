@@ -1,25 +1,33 @@
 package io.proxyt.hotspot
 
-import android.content.BroadcastReceiver
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
-import com.google.android.material.textfield.TextInputLayout
 import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
@@ -38,20 +46,30 @@ class MainActivity : AppCompatActivity() {
 
     private var localCandidates: List<HotspotAddressCandidate> = emptyList()
     private var suppressValidationCallbacks = false
+    private var pendingStartConfig: ProxyConfig? = null
+    private lateinit var statusPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val configToStart = pendingStartConfig
+        if (granted && configToStart != null) {
+            startProxyService(configToStart)
+            pendingStartConfig = null
+            return@registerForActivityResult
+        }
+
+        if (configToStart != null) {
+            persistNotificationPermissionFailure(configToStart)
+            showNotificationPermissionDeniedDialog()
+        }
+    }
 
     private val refreshHandler = Handler(Looper.getMainLooper())
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            renderStatus()
             renderLogs()
             refreshHandler.postDelayed(this, 2_000)
-        }
-    }
-
-    private val statusReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            renderStatus()
-            renderLogs()
         }
     }
 
@@ -72,6 +90,13 @@ class MainActivity : AppCompatActivity() {
         startButton = findViewById(R.id.startButton)
         stopButton = findViewById(R.id.stopButton)
         copyUrlButton = findViewById(R.id.copyUrlButton)
+
+        ProxyPreferences.reconcileStatus(this)
+        statusPreferenceListener = ProxyPreferences.registerStatusListener(this) {
+            runOnUiThread {
+                renderStatus()
+            }
+        }
 
         val config = ProxyPreferences.loadConfig(this)
         portEdit.setText(getString(R.string.port_value, config.port))
@@ -127,16 +152,7 @@ class MainActivity : AppCompatActivity() {
             val validation = validateUi(showErrors = true)
             val configToStart = validation.config ?: return@setOnClickListener
             ProxyPreferences.saveConfig(this, configToStart)
-            ContextCompat.startForegroundService(
-                this,
-                Intent(this, ProxyService::class.java).apply {
-                    action = ProxyService.ACTION_START
-                    putExtra(ProxyService.EXTRA_PORT, configToStart.port)
-                    putExtra(ProxyService.EXTRA_ADVERTISED_BASE_URL, configToStart.advertisedBaseUrl)
-                    putExtra(ProxyService.EXTRA_SELECTED_LOCAL_ADDRESS, configToStart.selectedLocalAddress)
-                    putExtra(ProxyService.EXTRA_DEBUG, configToStart.debug)
-                },
-            )
+            requestNotificationPermissionThenStart(configToStart)
         }
 
         stopButton.setOnClickListener {
@@ -153,19 +169,90 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        ContextCompat.registerReceiver(
-            this,
-            statusReceiver,
-            IntentFilter(ProxyService.ACTION_STATUS),
-            ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
+        renderStatus()
         refreshHandler.post(refreshRunnable)
     }
 
     override fun onStop() {
-        unregisterReceiver(statusReceiver)
         refreshHandler.removeCallbacks(refreshRunnable)
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        ProxyPreferences.unregisterStatusListener(this, statusPreferenceListener)
+        super.onDestroy()
+    }
+
+    private fun requestNotificationPermissionThenStart(config: ProxyConfig) {
+        if (hasNotificationPermission()) {
+            startProxyService(config)
+            return
+        }
+
+        pendingStartConfig = config
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.notification_permission_required_title)
+            .setMessage(R.string.notification_permission_required_message)
+            .setCancelable(false)
+            .setPositiveButton(R.string.notification_permission_continue) { _, _ ->
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                persistNotificationPermissionFailure(config)
+            }
+            .show()
+    }
+
+    private fun startProxyService(config: ProxyConfig) {
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, ProxyService::class.java).apply {
+                action = ProxyService.ACTION_START
+                putExtra(ProxyService.EXTRA_PORT, config.port)
+                putExtra(ProxyService.EXTRA_ADVERTISED_BASE_URL, config.advertisedBaseUrl)
+                putExtra(ProxyService.EXTRA_SELECTED_LOCAL_ADDRESS, config.selectedLocalAddress)
+                putExtra(ProxyService.EXTRA_DEBUG, config.debug)
+            },
+        )
+    }
+
+    private fun persistNotificationPermissionFailure(config: ProxyConfig) {
+        val resolvedBaseUrl = resolveAdvertisedBaseUrl(config)
+        ProxyPreferences.setStatus(
+            this,
+            ProxyStatus(
+                desiredRunning = true,
+                state = ProxyRuntimeState.Failed,
+                activeUrl = resolvedBaseUrl,
+                lastExitCode = null,
+                message = getString(R.string.notification_permission_required_short),
+                lastFailureReason = getString(R.string.notification_permission_required_message),
+            ),
+        )
+        renderStatus()
+    }
+
+    private fun showNotificationPermissionDeniedDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.notification_permission_required_title)
+            .setMessage(R.string.notification_permission_settings_message)
+            .setPositiveButton(R.string.open_settings) { _, _ ->
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", packageName, null),
+                    ),
+                )
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return true
+        }
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun refreshLocalAddressOptions() {
@@ -227,6 +314,9 @@ class MainActivity : AppCompatActivity() {
         validateUi(showErrors = false)
     }
 
+    private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String =
+        ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
+
     private fun renderStatus() {
         val validation = validateUi(showErrors = false)
         val candidateSummary = if (localCandidates.isEmpty()) {
@@ -244,28 +334,49 @@ class MainActivity : AppCompatActivity() {
             append(candidateSummary)
         }
 
-        val status = ProxyPreferences.readStatus(this)
+        val status = ProxyPreferences.reconcileStatus(this)
         statusView.text = buildString {
-            append(if (status.running) "Running" else "Stopped")
+            append("State: ")
+            append(status.state.name.lowercase().replaceFirstChar { it.titlecase(Locale.US) })
+            append("\nDesired: ")
+            append(if (status.desiredRunning) "Running" else "Stopped")
             if (status.activeUrl.isNotBlank()) {
-                append("\n")
+                append("\nActive URL: ")
                 append(status.activeUrl)
             }
             if (status.message.isNotBlank()) {
-                append("\n")
+                append("\nStatus: ")
                 append(status.message)
             }
-            if (!status.running && status.lastExitCode != null) {
-                append("\nExit code: ")
+            if (status.lastFailureReason.isNotBlank()) {
+                append("\nLast failure: ")
+                append(status.lastFailureReason)
+            }
+            if (status.lastExitCode != null) {
+                append("\nLast exit code: ")
                 append(status.lastExitCode)
+            }
+            if (status.startTimestampMs != null) {
+                append("\nStarted: ")
+                append(formatTimestamp(status.startTimestampMs))
+            }
+            if (status.lastSuccessfulStartTimestampMs != null) {
+                append("\nLast successful start: ")
+                append(formatTimestamp(status.lastSuccessfulStartTimestampMs))
+            }
+            if (!hasNotificationPermission()) {
+                append("\nNotifications required before the proxy can start on Android 13+.")
             }
         }
 
-        startButton.isEnabled = !status.running
-        stopButton.isEnabled = status.running
+        startButton.isEnabled = status.state != ProxyRuntimeState.Starting && status.state != ProxyRuntimeState.Running
+        stopButton.isEnabled = status.desiredRunning || status.isActive
     }
 
     private fun renderLogs() {
         logView.text = ProxyPreferences.readLogTail(this)
     }
+
+    private fun formatTimestamp(timestampMs: Long): String =
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(timestampMs))
 }

@@ -30,6 +30,10 @@ data class ResolvedEndpoint(
     val hotspotActive: Boolean? = null,
 )
 
+object ProxyHealthCheck {
+    fun localProbeUrl(port: Int): String = "http://127.0.0.1:$port"
+}
+
 class ProxyService : Service() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -209,9 +213,11 @@ class ProxyService : Service() {
         }
 
         val startTimestamp = System.currentTimeMillis()
+        val localProbeUrl = ProxyHealthCheck.localProbeUrl(config.port)
         stopRequested = false
         ProxyPreferences.appendLog(this, "Preflight bind OK: ${bindCheck.message}")
         ProxyPreferences.appendLog(this, "Starting proxy for ${resolvedEndpoint.activeUrl}")
+        ProxyPreferences.appendLog(this, "Using local startup probe $localProbeUrl")
         ProxyPreferences.setStatus(
             this,
             ProxyStatus(
@@ -225,7 +231,7 @@ class ProxyService : Service() {
                 error = null,
                 diagnostics = diagnosticsSeed.copy(
                     portBindResult = bindCheck.message,
-                    lastProbeResult = "HTTP health check pending",
+                    lastProbeResult = "Local HTTP probe pending: $localProbeUrl",
                 ),
             ),
         )
@@ -243,7 +249,11 @@ class ProxyService : Service() {
             ProxyPreferences.saveConfig(this, config)
 
             executor.execute {
-                val healthError = awaitHealthy(startedProcess, resolvedEndpoint.activeUrl)
+                val healthError = awaitHealthy(
+                    startedProcess = startedProcess,
+                    localProbeUrl = localProbeUrl,
+                    advertisedUrl = resolvedEndpoint.activeUrl,
+                )
                 if (stopRequested) {
                     val exitCode = startedProcess.waitFor()
                     val currentStatus = ProxyPreferences.readStatus(this)
@@ -286,7 +296,7 @@ class ProxyService : Service() {
                             diagnostics = diagnosticsSeed.copy(
                                 currentPid = processPid,
                                 portBindResult = "Process started but health check did not complete",
-                                lastProbeResult = "HTTP probe to ${resolvedEndpoint.activeUrl} failed",
+                                lastProbeResult = "Local HTTP probe to $localProbeUrl failed",
                             ),
                         ),
                     )
@@ -311,7 +321,7 @@ class ProxyService : Service() {
                         diagnostics = diagnosticsSeed.copy(
                             currentPid = processPid,
                             portBindResult = "Bind confirmed on port ${config.port}",
-                            lastProbeResult = "HTTP probe to ${resolvedEndpoint.activeUrl} succeeded",
+                            lastProbeResult = "Local HTTP probe to $localProbeUrl succeeded",
                         ),
                     ),
                 )
@@ -610,7 +620,11 @@ class ProxyService : Service() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun awaitHealthy(startedProcess: Process, effectiveUrl: String): ProxyErrorInfo? {
+    private fun awaitHealthy(
+        startedProcess: Process,
+        localProbeUrl: String,
+        advertisedUrl: String,
+    ): ProxyErrorInfo? {
         repeat(8) { attempt ->
             if (stopRequested) {
                 return null
@@ -626,7 +640,7 @@ class ProxyService : Service() {
                     logTail = ProxyPreferences.readLogTail(this, 4_000),
                 )
             }
-            if (probeUrl(effectiveUrl)) {
+            if (probeUrl(localProbeUrl)) {
                 return null
             }
             if (attempt < 7) {
@@ -644,7 +658,7 @@ class ProxyService : Service() {
         return ProxyErrorInfo(
             category = ProxyErrorCategory.STARTUP_FAILURE,
             title = getString(R.string.health_check_failed_title),
-            detail = "${getString(R.string.health_check_failed_detail)} URL: $effectiveUrl",
+            detail = "${getString(R.string.health_check_failed_detail)} Local probe: $localProbeUrl. Advertised URL: $advertisedUrl",
             recommendedAction = getString(R.string.health_check_failed_action),
         )
     }

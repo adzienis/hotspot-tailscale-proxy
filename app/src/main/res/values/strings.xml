@@ -73,8 +73,8 @@
     <string name="battery_optimization_ignored">Battery optimization is already disabled for this app.</string>
     <string name="disable_battery_optimization">Disable battery optimization</string>
     <string name="health_check_failed_title">Proxy failed health check</string>
-    <string name="health_check_failed_detail">The control URL did not answer after the proxy process started.</string>
-    <string name="health_check_failed_action">Refresh the local IP selection, verify the hotspot is active, disable battery optimization for this app, and try again.</string>
+    <string name="health_check_failed_detail">The local proxy listener did not answer after the process started.</string>
+    <string name="health_check_failed_action">Verify the listen port is still reachable on the phone, then retry. Hotspot clients may use the advertised URL separately.</string>
     <string name="notification_action_stop">Stop</string>
     <string name="notification_action_copy_url">Copy URL</string>
     <string name="notification_action_clear_error">Clear error</string>

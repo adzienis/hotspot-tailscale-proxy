@@ -3,8 +3,15 @@ package io.proxyt.hotspot
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
+data class HotspotAddressCandidate(
+    val interfaceName: String,
+    val address: String,
+    val score: Int,
+    val kind: String,
+)
+
 object HotspotAddressDetector {
-    fun detectPrivateIpv4(): String? {
+    fun detectCandidates(): List<HotspotAddressCandidate> {
         val candidates = buildList {
             val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@buildList
             while (interfaces.hasMoreElements()) {
@@ -13,14 +20,10 @@ object HotspotAddressDetector {
                     continue
                 }
 
-                val interfaceName = networkInterface.name.lowercase()
-                val score = when {
-                    "wlan" in interfaceName -> 0
-                    "ap" in interfaceName -> 1
-                    "swlan" in interfaceName -> 2
-                    "rndis" in interfaceName -> 3
-                    else -> 10
-                }
+                val interfaceName = networkInterface.name
+                val lowercaseName = interfaceName.lowercase()
+                val kind = classify(lowercaseName)
+                val score = score(lowercaseName)
 
                 val addresses = networkInterface.inetAddresses
                 while (addresses.hasMoreElements()) {
@@ -28,16 +31,29 @@ object HotspotAddressDetector {
                     val ipv4 = address as? Inet4Address ?: continue
                     val hostAddress = ipv4.hostAddress ?: continue
                     if (isPrivateIpv4(hostAddress)) {
-                        add(score to hostAddress)
+                        add(
+                            HotspotAddressCandidate(
+                                interfaceName = interfaceName,
+                                address = hostAddress,
+                                score = score,
+                                kind = kind,
+                            ),
+                        )
                     }
                 }
             }
         }
 
-        return candidates.minByOrNull { it.first }?.second
+        return candidates
+            .distinctBy { "${it.interfaceName}:${it.address}" }
+            .sortedWith(compareBy<HotspotAddressCandidate> { it.score }.thenBy { it.interfaceName }.thenBy { it.address })
     }
 
-    private fun isPrivateIpv4(hostAddress: String): Boolean {
+    fun detectPrivateIpv4(): String? {
+        return detectCandidates().firstOrNull()?.address
+    }
+
+    fun isPrivateIpv4(hostAddress: String): Boolean {
         val octets = hostAddress.split(".")
         if (octets.size != 4) {
             return false
@@ -53,4 +69,21 @@ object HotspotAddressDetector {
             else -> false
         }
     }
+
+    private fun classify(interfaceName: String): String =
+        when {
+            "rndis" in interfaceName || "usb" in interfaceName -> "USB tethering"
+            "ap" in interfaceName || "swlan" in interfaceName || "hotspot" in interfaceName -> "Hotspot"
+            "wlan" in interfaceName || "wifi" in interfaceName -> "Wi-Fi"
+            else -> "LAN"
+        }
+
+    private fun score(interfaceName: String): Int =
+        when {
+            "ap" in interfaceName || "hotspot" in interfaceName -> 0
+            "swlan" in interfaceName -> 1
+            "rndis" in interfaceName || "usb" in interfaceName -> 2
+            "wlan" in interfaceName || "wifi" in interfaceName -> 3
+            else -> 10
+        }
 }

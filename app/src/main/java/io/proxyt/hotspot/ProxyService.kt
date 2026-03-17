@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -68,9 +67,10 @@ class ProxyService : Service() {
             return
         }
 
-        val currentStatus = ProxyPreferences.readStatus(this)
+        val previousStatus = ProxyPreferences.readStatus(this)
         val config = parseConfig(intent)
-        val resolvedBaseUrl = resolveAdvertisedBaseUrl(config)
+        val resolvedBaseUrl = runCatching { resolveAdvertisedBaseUrl(config) }.getOrDefault("")
+
         if (!hasNotificationPermission()) {
             val error = notificationPermissionError()
             ProxyPreferences.setStatus(
@@ -82,11 +82,33 @@ class ProxyService : Service() {
                     lastExitCode = null,
                     message = getString(R.string.notification_permission_required_short),
                     lastFailureReason = error.detail,
-                    lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = error,
                 ),
             )
             ProxyPreferences.appendLog(this, "Start blocked: ${error.detail}")
+            sendStatusBroadcast()
+            stopSelf()
+            return
+        }
+
+        val configError = validateConfig(config)
+        if (configError != null) {
+            ProxyPreferences.setStatus(
+                this,
+                ProxyStatus(
+                    desiredRunning = true,
+                    state = ProxyRuntimeState.Failed,
+                    activeUrl = resolvedBaseUrl,
+                    lastExitCode = null,
+                    message = configError.title,
+                    lastFailureReason = configError.detail,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                    error = configError,
+                ),
+            )
+            ProxyPreferences.appendLog(this, configError.detail)
+            refreshNotification(configError.title)
             sendStatusBroadcast()
             stopSelf()
             return
@@ -111,34 +133,12 @@ class ProxyService : Service() {
                     lastExitCode = null,
                     message = error.title,
                     lastFailureReason = error.detail,
-                    lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = error,
                 ),
             )
             ProxyPreferences.appendLog(this, error.detail)
             refreshNotification(error.title)
-            sendStatusBroadcast()
-            stopSelf()
-            return
-        }
-
-        val configError = validateConfig(config)
-        if (configError != null) {
-            ProxyPreferences.setStatus(
-                this,
-                ProxyStatus(
-                    desiredRunning = true,
-                    state = ProxyRuntimeState.Failed,
-                    activeUrl = resolvedBaseUrl,
-                    lastExitCode = null,
-                    message = configError.title,
-                    lastFailureReason = configError.detail,
-                    lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
-                    error = configError,
-                ),
-            )
-            ProxyPreferences.appendLog(this, configError.detail)
-            refreshNotification(configError.title)
             sendStatusBroadcast()
             stopSelf()
             return
@@ -153,7 +153,7 @@ class ProxyService : Service() {
             add("--port")
             add(config.port.toString())
             add("--base-url")
-            add(resolvedBaseUrl)
+            add(resolveAdvertisedBaseUrl(config))
             if (config.debug) {
                 add("--debug")
             }
@@ -161,22 +161,22 @@ class ProxyService : Service() {
 
         val startTimestamp = System.currentTimeMillis()
         stopRequested = false
-        ProxyPreferences.appendLog(this, "Starting proxy for $resolvedBaseUrl")
+        ProxyPreferences.appendLog(this, "Starting proxy for ${resolveAdvertisedBaseUrl(config)}")
         ProxyPreferences.setStatus(
             this,
             ProxyStatus(
                 desiredRunning = true,
                 state = ProxyRuntimeState.Starting,
-                activeUrl = resolvedBaseUrl,
+                activeUrl = resolveAdvertisedBaseUrl(config),
                 lastExitCode = null,
                 message = "Starting proxy",
                 startTimestampMs = startTimestamp,
-                lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                 error = null,
             ),
         )
         sendStatusBroadcast()
-        startForeground(NOTIFICATION_ID, notification("Starting $resolvedBaseUrl"))
+        startForeground(NOTIFICATION_ID, notification("Starting ${resolveAdvertisedBaseUrl(config)}"))
 
         try {
             val startedProcess = ProcessBuilder(command)
@@ -191,15 +191,15 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Running,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolveAdvertisedBaseUrl(config),
                     lastExitCode = null,
-                    message = "Serving on $resolvedBaseUrl",
+                    message = "Serving on ${resolveAdvertisedBaseUrl(config)}",
                     startTimestampMs = startTimestamp,
                     lastSuccessfulStartTimestampMs = startTimestamp,
                     error = null,
                 ),
             )
-            refreshNotification("Serving $resolvedBaseUrl")
+            refreshNotification("Serving ${resolveAdvertisedBaseUrl(config)}")
             sendStatusBroadcast()
 
             executor.execute {
@@ -208,16 +208,16 @@ class ProxyService : Service() {
                     process = null
                 }
 
-                val previousStatus = ProxyPreferences.readStatus(this)
+                val currentStatus = ProxyPreferences.readStatus(this)
                 val nextStatus = if (stopRequested) {
                     ProxyStatus(
                         desiredRunning = false,
                         state = ProxyRuntimeState.Idle,
-                        activeUrl = resolvedBaseUrl,
+                        activeUrl = currentStatus.activeUrl,
                         lastExitCode = exitCode,
                         message = "Proxy stopped",
-                        startTimestampMs = previousStatus.startTimestampMs,
-                        lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                        startTimestampMs = currentStatus.startTimestampMs,
+                        lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
                         error = null,
                     )
                 } else {
@@ -229,12 +229,12 @@ class ProxyService : Service() {
                     ProxyStatus(
                         desiredRunning = true,
                         state = ProxyRuntimeState.Failed,
-                        activeUrl = resolvedBaseUrl,
+                        activeUrl = currentStatus.activeUrl,
                         lastExitCode = exitCode,
                         message = error.title,
                         lastFailureReason = error.detail,
-                        startTimestampMs = previousStatus.startTimestampMs,
-                        lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                        startTimestampMs = currentStatus.startTimestampMs,
+                        lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
                         error = error,
                     )
                 }
@@ -255,12 +255,12 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Failed,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolveAdvertisedBaseUrl(config),
                     lastExitCode = null,
                     message = error.title,
                     lastFailureReason = error.detail,
                     startTimestampMs = startTimestamp,
-                    lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = error,
                 ),
             )
@@ -313,52 +313,50 @@ class ProxyService : Service() {
         val fallback = ProxyPreferences.loadConfig(this)
         return ProxyConfig(
             port = intent?.getIntExtra(EXTRA_PORT, fallback.port) ?: fallback.port,
-            advertisedBaseUrl = intent?.getStringExtra(EXTRA_ADVERTISED_BASE_URL)
-                ?.trim()
-                ?.removeSuffix("/")
-                .orEmpty()
-                .ifBlank { fallback.advertisedBaseUrl.trim().removeSuffix("/") },
+            advertisedBaseUrl = intent?.getStringExtra(EXTRA_ADVERTISED_BASE_URL).orEmpty()
+                .ifBlank { fallback.advertisedBaseUrl },
+            selectedLocalAddress = intent?.getStringExtra(EXTRA_SELECTED_LOCAL_ADDRESS).orEmpty()
+                .ifBlank { fallback.selectedLocalAddress },
             debug = intent?.getBooleanExtra(EXTRA_DEBUG, fallback.debug) ?: fallback.debug,
         )
     }
 
-    private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String {
-        if (config.advertisedBaseUrl.isNotBlank()) {
-            return config.advertisedBaseUrl.trim().removeSuffix("/")
-        }
-
-        val address = HotspotAddressDetector.detectPrivateIpv4() ?: DEFAULT_HOTSPOT_IP
-        return "http://$address:${config.port}"
-    }
+    private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String =
+        ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
 
     private fun validateConfig(config: ProxyConfig): ProxyErrorInfo? {
-        if (config.port !in 1..65535) {
-            return ProxyErrorInfo(
+        val validation = ProxyConfigValidator.validate(
+            portInput = config.port.toString(),
+            advertisedBaseUrlInput = config.advertisedBaseUrl,
+            selectedLocalAddressInput = config.selectedLocalAddress,
+            debug = config.debug,
+            localCandidates = HotspotAddressDetector.detectCandidates(),
+        )
+
+        return when {
+            validation.portError != null -> ProxyErrorInfo(
                 category = ProxyErrorCategory.INVALID_CONFIG,
                 title = "Invalid configuration",
-                detail = "Port ${config.port} is outside the valid range of 1 to 65535.",
+                detail = validation.portError,
                 recommendedAction = "Enter a listen port between 1 and 65535, then try again.",
             )
-        }
 
-        val advertisedBaseUrl = config.advertisedBaseUrl
-        if (advertisedBaseUrl.isBlank()) {
-            return null
-        }
-
-        val uri = Uri.parse(advertisedBaseUrl)
-        val scheme = uri.scheme?.lowercase()
-        val host = uri.host
-        if ((scheme != "http" && scheme != "https") || host.isNullOrBlank()) {
-            return ProxyErrorInfo(
+            validation.baseUrlError != null -> ProxyErrorInfo(
                 category = ProxyErrorCategory.INVALID_CONFIG,
                 title = "Invalid configuration",
-                detail = "Advertised URL must be a full http:// or https:// URL with a host.",
-                recommendedAction = "Fix the advertised base URL or clear it to use the detected hotspot address.",
+                detail = validation.baseUrlError,
+                recommendedAction = "Fix the advertised base URL or clear it to use the selected local IP.",
             )
-        }
 
-        return null
+            validation.localAddressError != null -> ProxyErrorInfo(
+                category = ProxyErrorCategory.INVALID_CONFIG,
+                title = "Invalid configuration",
+                detail = validation.localAddressError,
+                recommendedAction = "Pick one of the detected private IPv4 addresses or enter a full advertised URL.",
+            )
+
+            else -> null
+        }
     }
 
     private fun classifyProcessFailure(
@@ -479,6 +477,7 @@ class ProxyService : Service() {
 
         const val EXTRA_PORT = "extra_port"
         const val EXTRA_ADVERTISED_BASE_URL = "extra_advertised_base_url"
+        const val EXTRA_SELECTED_LOCAL_ADDRESS = "extra_selected_local_address"
         const val EXTRA_DEBUG = "extra_debug"
         const val DEFAULT_HOTSPOT_IP = "192.168.43.1"
 

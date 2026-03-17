@@ -11,6 +11,7 @@ import java.util.Locale
 data class ProxyConfig(
     val port: Int = 8080,
     val advertisedBaseUrl: String = "",
+    val selectedLocalAddress: String = "",
     val debug: Boolean = false,
 )
 
@@ -58,6 +59,7 @@ object ProxyPreferences {
     private const val NAME = "proxy_preferences"
     private const val KEY_PORT = "port"
     private const val KEY_ADVERTISED_BASE_URL = "advertised_base_url"
+    private const val KEY_SELECTED_LOCAL_ADDRESS = "selected_local_address"
     private const val KEY_DEBUG = "debug"
     private const val KEY_DESIRED_RUNNING = "desired_running"
     private const val KEY_STATE = "state"
@@ -93,6 +95,7 @@ object ProxyPreferences {
         return ProxyConfig(
             port = preferences.getInt(KEY_PORT, 8080),
             advertisedBaseUrl = preferences.getString(KEY_ADVERTISED_BASE_URL, "").orEmpty(),
+            selectedLocalAddress = preferences.getString(KEY_SELECTED_LOCAL_ADDRESS, "").orEmpty(),
             debug = preferences.getBoolean(KEY_DEBUG, false),
         )
     }
@@ -101,6 +104,7 @@ object ProxyPreferences {
         preferences(context).edit()
             .putInt(KEY_PORT, config.port)
             .putString(KEY_ADVERTISED_BASE_URL, config.advertisedBaseUrl)
+            .putString(KEY_SELECTED_LOCAL_ADDRESS, config.selectedLocalAddress)
             .putBoolean(KEY_DEBUG, config.debug)
             .apply()
     }

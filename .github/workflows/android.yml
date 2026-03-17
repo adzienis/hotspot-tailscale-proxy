@@ -31,7 +31,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v4
 
       - uses: actions/setup-go@v5
         with:
@@ -44,7 +45,7 @@ jobs:
         run: yes | sdkmanager --licenses >/dev/null
 
       - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Write local.properties
         run: printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
@@ -74,7 +75,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v4
 
       - uses: actions/setup-go@v5
         with:

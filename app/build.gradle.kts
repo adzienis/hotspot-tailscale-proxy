@@ -90,7 +90,7 @@ val buildGoAndroidBinaries = tasks.register<BuildGoAndroidBinariesTask>("buildGo
     group = "build"
     description = "Builds the bundled Go proxy binary for all supported Android ABIs."
     sourceDir.set(goSourceDir)
-    sdkDir.set(androidSdkDir)
+    sdkDirPath.set(androidSdkDir.absolutePath)
     outputDir.set(generatedGoJniLibsDir)
     abiMatrix.set(
         supportedGoAbis.map { abi ->
@@ -172,7 +172,7 @@ android {
     }
 }
 
-tasks.named("preBuild") {
+tasks.matching { it.name.matches(Regex("merge.+JniLibFolders")) }.configureEach {
     dependsOn(buildGoAndroidBinaries)
 }
 

@@ -513,10 +513,10 @@ class MainActivity : AppCompatActivity() {
         lastProbeResultView.text = status.diagnostics.lastProbeStatus.ifBlank { getString(R.string.diagnostics_not_available) }
         probeTargetView.text = status.diagnostics.lastProbeTarget.ifBlank { getString(R.string.diagnostics_not_available) }
         probeDetailView.text = status.diagnostics.lastProbeDetail.ifBlank { getString(R.string.diagnostics_not_available) }
-        hotspotActiveView.text = when (status.diagnostics.hotspotActive) {
-            true -> getString(R.string.hotspot_active_yes)
-            false -> getString(R.string.hotspot_active_no)
-            null -> getString(R.string.diagnostics_not_available)
+        hotspotActiveView.text = if (isHotspotCurrentlyActive()) {
+            getString(R.string.hotspot_active_yes)
+        } else {
+            getString(R.string.hotspot_active_no)
         }
         copyLastErrorButton.visibility = if (buildClipboardError(status) == null) View.GONE else View.VISIBLE
         batteryOptimizationButton.visibility = if (isIgnoringBatteryOptimizations()) View.GONE else View.VISIBLE
@@ -600,10 +600,8 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.quick_start_running_summary)
             status.error != null ->
                 getString(R.string.quick_start_error_summary)
-            status.diagnostics.hotspotActive == false ->
+            !isHotspotCurrentlyActive() ->
                 getString(R.string.quick_start_hotspot_disabled)
-            status.diagnostics.hotspotActive == null ->
-                getString(R.string.quick_start_hotspot_unknown)
             effectiveUrl.isNotBlank() ->
                 getString(R.string.quick_start_ready_to_start)
             else ->
@@ -614,7 +612,7 @@ class MainActivity : AppCompatActivity() {
         if (
             hasNotificationPermission() &&
             isIgnoringBatteryOptimizations() &&
-            status.diagnostics.hotspotActive == true
+            isHotspotCurrentlyActive()
         ) {
             getString(R.string.readiness_summary_ready)
         } else {
@@ -629,10 +627,12 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun hotspotReadinessText(status: ProxyStatus): String =
-        when (status.diagnostics.hotspotActive) {
-            true -> getString(R.string.readiness_hotspot_ready)
-            false -> getString(R.string.readiness_hotspot_disabled)
-            null -> getString(R.string.readiness_hotspot_unknown)
+        if (isHotspotCurrentlyActive()) getString(R.string.readiness_hotspot_ready)
+        else getString(R.string.readiness_hotspot_disabled)
+
+    private fun isHotspotCurrentlyActive(): Boolean =
+        localCandidates.any { candidate ->
+            candidate.kind == "Hotspot" || candidate.kind == "USB tethering"
         }
 
     private fun batteryReadinessText(): String =
@@ -816,7 +816,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("Last probe status: ${status.diagnostics.lastProbeStatus.ifBlank { "n/a" }}")
             appendLine("Last probe target: ${status.diagnostics.lastProbeTarget.ifBlank { "n/a" }}")
             appendLine("Last probe detail: ${status.diagnostics.lastProbeDetail.ifBlank { "n/a" }}")
-            appendLine("Hotspot active: ${status.diagnostics.hotspotActive?.toString() ?: "n/a"}")
+            appendLine("Hotspot active: ${isHotspotCurrentlyActive()}")
             appendLine("Last exit code: ${status.lastExitCode?.toString() ?: "n/a"}")
             appendLine("Last failure: ${status.error?.detail ?: status.lastFailureReason.ifBlank { "n/a" }}")
             appendLine("Recommended action: ${status.error?.recommendedAction ?: defaultRecommendedAction(status)}")

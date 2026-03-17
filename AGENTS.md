@@ -81,7 +81,7 @@ Useful checks:
 - Open a PR against `main`.
 - If the PR goes stale or shows conflicts, fetch `origin/main`, rebase the branch onto it, and `git push --force-with-lease`.
 - Never resolve PR drift by merging `main` into the branch.
-- GitHub also runs `.github/workflows/pr-auto-rebase.yml` after pushes to `main` to rebase stale same-repo PR branches automatically. Fork PRs are skipped, and conflicted rebases still require a local manual rebase.
+- GitHub also runs `.github/workflows/pr-auto-rebase.yml` after pushes to `main` to rebase stale same-repo PR branches automatically. That workflow must use the `PR_AUTOREBASE_TOKEN` secret so its force-pushes trigger the normal PR checks. Fork PRs are skipped, and conflicted rebases still require a local manual rebase.
 - Include:
   - a short summary
   - verification commands actually run

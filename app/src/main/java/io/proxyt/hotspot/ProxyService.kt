@@ -6,6 +6,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,9 +15,20 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+
+data class ResolvedEndpoint(
+    val activeUrl: String,
+    val selectedInterface: String = "",
+    val selectedIp: String = "",
+    val hotspotActive: Boolean? = null,
+)
 
 class ProxyService : Service() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -38,6 +51,8 @@ class ProxyService : Service() {
         ProxyPreferences.reconcileStatus(this)
         when (intent?.action) {
             ACTION_STOP -> stopProxy()
+            ACTION_COPY_URL -> copyActiveUrlToClipboard()
+            ACTION_CLEAR_ERROR -> clearErrorState()
             else -> startProxy(intent)
         }
         return START_STICKY
@@ -69,7 +84,10 @@ class ProxyService : Service() {
 
         val previousStatus = ProxyPreferences.readStatus(this)
         val config = parseConfig(intent)
-        val resolvedBaseUrl = runCatching { resolveAdvertisedBaseUrl(config) }.getOrDefault("")
+        val localCandidates = HotspotAddressDetector.detectCandidates()
+        val resolvedEndpoint = runCatching { resolveEndpoint(config, localCandidates) }
+            .getOrDefault(ResolvedEndpoint(activeUrl = ""))
+        val diagnosticsSeed = buildDiagnosticsSeed(resolvedEndpoint, localCandidates)
 
         if (!hasNotificationPermission()) {
             val error = notificationPermissionError()
@@ -78,12 +96,13 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Failed,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolvedEndpoint.activeUrl,
                     lastExitCode = null,
                     message = getString(R.string.notification_permission_required_short),
                     lastFailureReason = error.detail,
                     lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = error,
+                    diagnostics = diagnosticsSeed,
                 ),
             )
             ProxyPreferences.appendLog(this, "Start blocked: ${error.detail}")
@@ -99,16 +118,45 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Failed,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolvedEndpoint.activeUrl,
                     lastExitCode = null,
                     message = configError.title,
                     lastFailureReason = configError.detail,
                     lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = configError,
+                    diagnostics = diagnosticsSeed.copy(portBindResult = "Validation failed before bind"),
                 ),
             )
             ProxyPreferences.appendLog(this, configError.detail)
             refreshNotification(configError.title)
+            sendStatusBroadcast()
+            stopSelf()
+            return
+        }
+
+        val bindCheck = checkPortBindable(config.port)
+        if (!bindCheck.canBind) {
+            val error = ProxyErrorInfo(
+                category = ProxyErrorCategory.PORT_IN_USE,
+                title = "Port is already in use",
+                detail = bindCheck.message,
+                recommendedAction = "Choose a different listen port or stop the app that is already using this port.",
+            )
+            ProxyPreferences.setStatus(
+                this,
+                ProxyStatus(
+                    desiredRunning = true,
+                    state = ProxyRuntimeState.Failed,
+                    activeUrl = resolvedEndpoint.activeUrl,
+                    message = error.title,
+                    lastFailureReason = error.detail,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                    error = error,
+                    diagnostics = diagnosticsSeed.copy(portBindResult = bindCheck.message),
+                ),
+            )
+            ProxyPreferences.appendLog(this, "Preflight bind failed: ${bindCheck.message}")
+            refreshNotification(error.title)
             sendStatusBroadcast()
             stopSelf()
             return
@@ -129,12 +177,13 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Failed,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolvedEndpoint.activeUrl,
                     lastExitCode = null,
                     message = error.title,
                     lastFailureReason = error.detail,
                     lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = error,
+                    diagnostics = diagnosticsSeed.copy(portBindResult = bindCheck.message),
                 ),
             )
             ProxyPreferences.appendLog(this, error.detail)
@@ -153,7 +202,7 @@ class ProxyService : Service() {
             add("--port")
             add(config.port.toString())
             add("--base-url")
-            add(resolveAdvertisedBaseUrl(config))
+            add(resolvedEndpoint.activeUrl)
             if (config.debug) {
                 add("--debug")
             }
@@ -161,48 +210,118 @@ class ProxyService : Service() {
 
         val startTimestamp = System.currentTimeMillis()
         stopRequested = false
-        ProxyPreferences.appendLog(this, "Starting proxy for ${resolveAdvertisedBaseUrl(config)}")
+        ProxyPreferences.appendLog(this, "Preflight bind OK: ${bindCheck.message}")
+        ProxyPreferences.appendLog(this, "Starting proxy for ${resolvedEndpoint.activeUrl}")
         ProxyPreferences.setStatus(
             this,
             ProxyStatus(
                 desiredRunning = true,
                 state = ProxyRuntimeState.Starting,
-                activeUrl = resolveAdvertisedBaseUrl(config),
+                activeUrl = resolvedEndpoint.activeUrl,
                 lastExitCode = null,
                 message = "Starting proxy",
                 startTimestampMs = startTimestamp,
                 lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                 error = null,
+                diagnostics = diagnosticsSeed.copy(
+                    portBindResult = bindCheck.message,
+                    lastProbeResult = "HTTP health check pending",
+                ),
             ),
         )
         sendStatusBroadcast()
-        startForeground(NOTIFICATION_ID, notification("Starting ${resolveAdvertisedBaseUrl(config)}"))
+        startForeground(NOTIFICATION_ID, notification("Starting ${resolvedEndpoint.activeUrl}"))
 
         try {
             val startedProcess = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
                 .start()
+            val processPid = safeProcessPid(startedProcess)
 
             process = startedProcess
             ProxyPreferences.saveConfig(this, config)
-            ProxyPreferences.setStatus(
-                this,
-                ProxyStatus(
-                    desiredRunning = true,
-                    state = ProxyRuntimeState.Running,
-                    activeUrl = resolveAdvertisedBaseUrl(config),
-                    lastExitCode = null,
-                    message = "Serving on ${resolveAdvertisedBaseUrl(config)}",
-                    startTimestampMs = startTimestamp,
-                    lastSuccessfulStartTimestampMs = startTimestamp,
-                    error = null,
-                ),
-            )
-            refreshNotification("Serving ${resolveAdvertisedBaseUrl(config)}")
-            sendStatusBroadcast()
 
             executor.execute {
+                val healthError = awaitHealthy(startedProcess, resolvedEndpoint.activeUrl)
+                if (stopRequested) {
+                    val exitCode = startedProcess.waitFor()
+                    val currentStatus = ProxyPreferences.readStatus(this)
+                    ProxyPreferences.setStatus(
+                        this,
+                        ProxyStatus(
+                            desiredRunning = false,
+                            state = ProxyRuntimeState.Idle,
+                            activeUrl = currentStatus.activeUrl.ifBlank { resolvedEndpoint.activeUrl },
+                            lastExitCode = exitCode,
+                            message = "Proxy stopped",
+                            startTimestampMs = currentStatus.startTimestampMs,
+                            lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                            error = null,
+                            diagnostics = currentStatus.diagnostics.copy(currentPid = null),
+                        ),
+                    )
+                    refreshNotification("Proxy stopped")
+                    sendStatusBroadcast()
+                    stopSelf()
+                    return@execute
+                }
+
+                if (healthError != null) {
+                    if (process === startedProcess) {
+                        process = null
+                    }
+                    ProxyPreferences.setStatus(
+                        this,
+                        ProxyStatus(
+                            desiredRunning = true,
+                            state = ProxyRuntimeState.Failed,
+                            activeUrl = resolvedEndpoint.activeUrl,
+                            lastExitCode = runCatching { startedProcess.exitValue() }.getOrNull(),
+                            message = healthError.title,
+                            lastFailureReason = healthError.detail,
+                            startTimestampMs = startTimestamp,
+                            lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                            error = healthError,
+                            diagnostics = diagnosticsSeed.copy(
+                                currentPid = processPid,
+                                portBindResult = "Process started but health check did not complete",
+                                lastProbeResult = "HTTP probe to ${resolvedEndpoint.activeUrl} failed",
+                            ),
+                        ),
+                    )
+                    ProxyPreferences.appendLog(this, healthError.detail)
+                    refreshNotification(healthError.title)
+                    sendStatusBroadcast()
+                    stopSelf()
+                    return@execute
+                }
+
+                ProxyPreferences.setStatus(
+                    this,
+                    ProxyStatus(
+                        desiredRunning = true,
+                        state = ProxyRuntimeState.Running,
+                        activeUrl = resolvedEndpoint.activeUrl,
+                        lastExitCode = null,
+                        message = "Serving on ${resolvedEndpoint.activeUrl}",
+                        startTimestampMs = startTimestamp,
+                        lastSuccessfulStartTimestampMs = startTimestamp,
+                        error = null,
+                        diagnostics = diagnosticsSeed.copy(
+                            currentPid = processPid,
+                            portBindResult = "Bind confirmed on port ${config.port}",
+                            lastProbeResult = "HTTP probe to ${resolvedEndpoint.activeUrl} succeeded",
+                        ),
+                    ),
+                )
+                ProxyPreferences.appendLog(
+                    this,
+                    "Serving on ${resolvedEndpoint.activeUrl}${processPid?.let { \" (pid $it)\" }.orEmpty()}",
+                )
+                refreshNotification("Serving ${resolvedEndpoint.activeUrl}")
+                sendStatusBroadcast()
+
                 val exitCode = startedProcess.waitFor()
                 if (process === startedProcess) {
                     process = null
@@ -213,12 +332,13 @@ class ProxyService : Service() {
                     ProxyStatus(
                         desiredRunning = false,
                         state = ProxyRuntimeState.Idle,
-                        activeUrl = currentStatus.activeUrl,
+                        activeUrl = currentStatus.activeUrl.ifBlank { resolvedEndpoint.activeUrl },
                         lastExitCode = exitCode,
                         message = "Proxy stopped",
                         startTimestampMs = currentStatus.startTimestampMs,
                         lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
                         error = null,
+                        diagnostics = currentStatus.diagnostics.copy(currentPid = null),
                     )
                 } else {
                     val error = classifyProcessFailure(
@@ -229,13 +349,17 @@ class ProxyService : Service() {
                     ProxyStatus(
                         desiredRunning = true,
                         state = ProxyRuntimeState.Failed,
-                        activeUrl = currentStatus.activeUrl,
+                        activeUrl = currentStatus.activeUrl.ifBlank { resolvedEndpoint.activeUrl },
                         lastExitCode = exitCode,
                         message = error.title,
                         lastFailureReason = error.detail,
                         startTimestampMs = currentStatus.startTimestampMs,
                         lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
                         error = error,
+                        diagnostics = currentStatus.diagnostics.copy(
+                            currentPid = null,
+                            portBindResult = "Proxy process exited before shutdown",
+                        ),
                     )
                 }
                 ProxyPreferences.setStatus(this, nextStatus)
@@ -255,13 +379,14 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Failed,
-                    activeUrl = resolveAdvertisedBaseUrl(config),
+                    activeUrl = resolvedEndpoint.activeUrl,
                     lastExitCode = null,
                     message = error.title,
                     lastFailureReason = error.detail,
                     startTimestampMs = startTimestamp,
                     lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
                     error = error,
+                    diagnostics = diagnosticsSeed.copy(portBindResult = "Proxy failed before bind was confirmed"),
                 ),
             )
             ProxyPreferences.appendLog(this, "Failed to start proxy: ${error.detail}")
@@ -282,6 +407,7 @@ class ProxyService : Service() {
                     message = "Proxy stopped",
                     lastFailureReason = "",
                     error = null,
+                    diagnostics = currentStatus.diagnostics.copy(currentPid = null),
                 ),
             )
             sendStatusBroadcast()
@@ -297,6 +423,10 @@ class ProxyService : Service() {
                 state = ProxyRuntimeState.Stopping,
                 message = "Stopping proxy",
                 error = null,
+                diagnostics = currentStatus.diagnostics.copy(
+                    currentPid = safeProcessPid(runningProcess),
+                    lastProbeResult = currentStatus.diagnostics.lastProbeResult.ifBlank { "No probe recorded" },
+                ),
             ),
         )
         refreshNotification("Stopping proxy")
@@ -321,8 +451,25 @@ class ProxyService : Service() {
         )
     }
 
-    private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String =
-        ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
+    private fun resolveEndpoint(
+        config: ProxyConfig,
+        localCandidates: List<HotspotAddressCandidate>,
+    ): ResolvedEndpoint {
+        val activeUrl = ProxyConfigValidator.resolveEffectiveUrl(config, localCandidates)
+        val selectedIp = when {
+            config.advertisedBaseUrl.isNotBlank() -> ""
+            config.selectedLocalAddress.isNotBlank() -> config.selectedLocalAddress
+            else -> localCandidates.firstOrNull()?.address.orEmpty()
+        }
+        val selectedInterface = localCandidates.firstOrNull { it.address == selectedIp }?.interfaceName.orEmpty()
+        val hotspotActive = localCandidates.any { it.kind == "Hotspot" || it.kind == "USB tethering" }
+        return ResolvedEndpoint(
+            activeUrl = activeUrl,
+            selectedInterface = selectedInterface,
+            selectedIp = selectedIp,
+            hotspotActive = hotspotActive,
+        )
+    }
 
     private fun validateConfig(config: ProxyConfig): ProxyErrorInfo? {
         val validation = ProxyConfigValidator.validate(
@@ -356,6 +503,43 @@ class ProxyService : Service() {
             )
 
             else -> null
+        }
+    }
+
+    private fun buildDiagnosticsSeed(
+        endpoint: ResolvedEndpoint,
+        localCandidates: List<HotspotAddressCandidate>,
+    ): ProxyDiagnostics {
+        val selectedInterface = endpoint.selectedInterface.ifBlank {
+            endpoint.selectedIp.takeIf { it.isNotBlank() }
+                ?.let { ip -> localCandidates.firstOrNull { it.address == ip }?.interfaceName }
+                .orEmpty()
+        }
+        return ProxyDiagnostics(
+            selectedInterface = selectedInterface,
+            selectedIp = endpoint.selectedIp,
+            hotspotActive = endpoint.hotspotActive,
+        )
+    }
+
+    private fun checkPortBindable(port: Int): PortBindCheck {
+        return try {
+            ServerSocket().use { socket ->
+                socket.reuseAddress = true
+                socket.bind(InetSocketAddress("0.0.0.0", port))
+            }
+            PortBindCheck(true, "Preflight bind OK on port $port")
+        } catch (exception: Exception) {
+            PortBindCheck(false, "Port $port is unavailable: ${exception.message ?: "unknown error"}")
+        }
+    }
+
+    private fun safeProcessPid(process: Process): Long? {
+        return try {
+            val method = process.javaClass.getMethod("pid")
+            (method.invoke(process) as? Long)
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -426,6 +610,90 @@ class ProxyService : Service() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun awaitHealthy(startedProcess: Process, effectiveUrl: String): ProxyErrorInfo? {
+        repeat(8) { attempt ->
+            if (stopRequested) {
+                return null
+            }
+            if (process !== startedProcess) {
+                return null
+            }
+            if (!startedProcess.isAlive) {
+                val exitCode = runCatching { startedProcess.exitValue() }.getOrNull()
+                return classifyProcessFailure(
+                    detail = "Proxy exited before passing the startup health check.",
+                    exitCode = exitCode,
+                    logTail = ProxyPreferences.readLogTail(this, 4_000),
+                )
+            }
+            if (probeUrl(effectiveUrl)) {
+                return null
+            }
+            if (attempt < 7) {
+                Thread.sleep(750)
+            }
+        }
+
+        runCatching {
+            startedProcess.destroy()
+            if (!startedProcess.waitFor(2, TimeUnit.SECONDS)) {
+                startedProcess.destroyForcibly()
+            }
+        }
+
+        return ProxyErrorInfo(
+            category = ProxyErrorCategory.STARTUP_FAILURE,
+            title = getString(R.string.health_check_failed_title),
+            detail = "${getString(R.string.health_check_failed_detail)} URL: $effectiveUrl",
+            recommendedAction = getString(R.string.health_check_failed_action),
+        )
+    }
+
+    private fun probeUrl(url: String): Boolean {
+        if (url.isBlank()) {
+            return false
+        }
+
+        return runCatching {
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 1_000
+                readTimeout = 1_000
+                instanceFollowRedirects = false
+                setRequestProperty("Connection", "close")
+            }
+            try {
+                val code = connection.responseCode
+                code in 100..599
+            } finally {
+                connection.disconnect()
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun copyActiveUrlToClipboard() {
+        val status = ProxyPreferences.readStatus(this)
+        val activeUrl = status.activeUrl.ifBlank { return }
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("Proxy control URL", activeUrl))
+        ProxyPreferences.appendLog(this, "Copied active URL from notification")
+        refreshNotification(status.message)
+    }
+
+    private fun clearErrorState() {
+        val status = ProxyPreferences.readStatus(this)
+        val nextStatus = status.copy(
+            desiredRunning = if (status.state == ProxyRuntimeState.Failed) false else status.desiredRunning,
+            state = if (status.state == ProxyRuntimeState.Failed) ProxyRuntimeState.Idle else status.state,
+            message = if (status.state == ProxyRuntimeState.Failed) "Proxy idle" else status.message,
+            lastFailureReason = "",
+            error = null,
+        )
+        ProxyPreferences.setStatus(this, nextStatus)
+        sendStatusBroadcast()
+        refreshNotification(nextStatus.message)
+    }
+
     private fun sendStatusBroadcast() {
         sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName))
     }
@@ -440,21 +708,54 @@ class ProxyService : Service() {
 
     private fun notification(status: String): Notification {
         val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
+        val launchPendingIntent = PendingIntent.getActivity(
             this,
             0,
             launchIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val currentStatus = ProxyPreferences.readStatus(this)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(status)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(status))
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(launchPendingIntent)
             .setOngoing(process != null)
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                getString(R.string.notification_action_stop),
+                servicePendingIntent(ACTION_STOP, 1),
+            )
+            .apply {
+                if (currentStatus.activeUrl.isNotBlank()) {
+                    addAction(
+                        android.R.drawable.ic_menu_share,
+                        getString(R.string.notification_action_copy_url),
+                        servicePendingIntent(ACTION_COPY_URL, 2),
+                    )
+                }
+                if (currentStatus.error != null || currentStatus.lastFailureReason.isNotBlank()) {
+                    addAction(
+                        android.R.drawable.ic_menu_close_clear_cancel,
+                        getString(R.string.notification_action_clear_error),
+                        servicePendingIntent(ACTION_CLEAR_ERROR, 3),
+                    )
+                }
+            }
             .build()
     }
+
+    private fun servicePendingIntent(action: String, requestCode: Int): PendingIntent =
+        PendingIntent.getService(
+            this,
+            requestCode,
+            Intent(this, ProxyService::class.java).apply {
+                this.action = action
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -474,6 +775,8 @@ class ProxyService : Service() {
         const val ACTION_START = "io.proxyt.hotspot.action.START"
         const val ACTION_STATUS = "io.proxyt.hotspot.action.STATUS"
         const val ACTION_STOP = "io.proxyt.hotspot.action.STOP"
+        const val ACTION_COPY_URL = "io.proxyt.hotspot.action.COPY_URL"
+        const val ACTION_CLEAR_ERROR = "io.proxyt.hotspot.action.CLEAR_ERROR"
 
         const val EXTRA_PORT = "extra_port"
         const val EXTRA_ADVERTISED_BASE_URL = "extra_advertised_base_url"
@@ -486,3 +789,8 @@ class ProxyService : Service() {
         private const val NATIVE_BINARY = "libproxyt.so"
     }
 }
+
+data class PortBindCheck(
+    val canBind: Boolean,
+    val message: String,
+)

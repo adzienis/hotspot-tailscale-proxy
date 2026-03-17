@@ -416,33 +416,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshLocalAddressOptions() {
-        localCandidates = HotspotAddressDetector.detectCandidates()
-        val savedSelection = localAddressPicker.text?.toString()?.trim().orEmpty()
-        val options = buildList {
-            localCandidates.forEach { candidate ->
-                add(candidate.address)
-            }
-            if (savedSelection.isNotBlank() && localCandidates.none { it.address == savedSelection }) {
-                add(savedSelection)
-            }
-        }
+        localCandidates = HotspotAddressDetector.detectCandidates(this)
+        val currentSelection = localAddressPicker.text?.toString()?.trim().orEmpty()
+        val resolvedSelection = LocalAddressSelectionResolver.resolve(
+            candidates = localCandidates,
+            currentSelection = currentSelection,
+        )
         localAddressPicker.setAdapter(
             ArrayAdapter(
                 this,
                 android.R.layout.simple_dropdown_item_1line,
-                options,
+                resolvedSelection.options,
             ),
         )
-        if (savedSelection.isNotBlank()) {
+        if (currentSelection != resolvedSelection.selectedAddress) {
             suppressValidationCallbacks = true
-            localAddressPicker.setText(savedSelection, false)
+            localAddressPicker.setText(resolvedSelection.selectedAddress, false)
             suppressValidationCallbacks = false
-        } else if (localCandidates.isNotEmpty()) {
-            suppressValidationCallbacks = true
-            localAddressPicker.setText(localCandidates.first().address, false)
-            suppressValidationCallbacks = false
+            persistSelectedLocalAddress(resolvedSelection.selectedAddress)
         }
         renderValidation()
+    }
+
+    private fun persistSelectedLocalAddress(selectedAddress: String) {
+        val currentConfig = ProxyPreferences.loadConfig(this)
+        if (currentConfig.selectedLocalAddress == selectedAddress) {
+            return
+        }
+        ProxyPreferences.saveConfig(
+            this,
+            currentConfig.copy(selectedLocalAddress = selectedAddress),
+        )
     }
 
     private fun validateUi(showErrors: Boolean): ProxyConfigValidationResult {

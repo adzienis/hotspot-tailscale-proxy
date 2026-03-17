@@ -22,11 +22,29 @@ class HotspotAddressDetectorTest {
                 HotspotAddressCandidate(interfaceName = "eth0", address = "192.168.0.2", score = 10, kind = "LAN"),
                 HotspotAddressCandidate(interfaceName = "ap0", address = "192.168.43.1", score = 0, kind = "Hotspot"),
                 HotspotAddressCandidate(interfaceName = "ap0", address = "192.168.43.1", score = 0, kind = "Hotspot"),
+                HotspotAddressCandidate(interfaceName = "wlan0", address = "192.168.43.1", score = 3, kind = "Wi-Fi"),
             ),
         )
 
         assertEquals(2, ranked.size)
         assertEquals("192.168.43.1", ranked.first().address)
+        assertEquals("ap0", ranked.first().interfaceName)
         assertEquals("192.168.0.2", ranked.last().address)
+    }
+
+    @Test
+    fun `filters to active links when connectivity data matches candidates`() {
+        val filtered = HotspotAddressDetector.filterActiveCandidates(
+            candidates = listOf(
+                HotspotAddressCandidate(interfaceName = "ap0", address = "192.168.43.1", score = 0, kind = "Hotspot"),
+                HotspotAddressCandidate(interfaceName = "wlan0", address = "192.168.1.20", score = 3, kind = "Wi-Fi"),
+            ),
+            activeLinks = setOf(
+                HotspotAddressDetector.ActiveLink(interfaceName = "wlan0", address = "192.168.1.20"),
+            ),
+        )
+
+        assertEquals(1, filtered.size)
+        assertEquals("192.168.1.20", filtered.single().address)
     }
 }

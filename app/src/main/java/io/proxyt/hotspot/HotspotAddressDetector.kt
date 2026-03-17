@@ -1,5 +1,7 @@
 package io.proxyt.hotspot
 
+import android.content.Context
+import android.net.ConnectivityManager
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -11,6 +13,11 @@ data class HotspotAddressCandidate(
 )
 
 object HotspotAddressDetector {
+    data class ActiveLink(
+        val interfaceName: String,
+        val address: String,
+    )
+
     fun detectCandidates(): List<HotspotAddressCandidate> {
         val candidates = buildList {
             val interfaces = NetworkInterface.getNetworkInterfaces() ?: return@buildList
@@ -47,9 +54,23 @@ object HotspotAddressDetector {
         return rankCandidates(candidates)
     }
 
+    fun detectCandidates(context: Context): List<HotspotAddressCandidate> {
+        val rankedCandidates = detectCandidates()
+        val activeLinks = activeLinks(context)
+        return filterActiveCandidates(rankedCandidates, activeLinks)
+    }
+
     internal fun rankCandidates(candidates: List<HotspotAddressCandidate>): List<HotspotAddressCandidate> {
         return candidates
-            .distinctBy { "${it.interfaceName}:${it.address}" }
+            .groupBy { it.address }
+            .values
+            .map { addressCandidates ->
+                addressCandidates.minWith(
+                    compareBy<HotspotAddressCandidate> { it.score }
+                        .thenBy { it.interfaceName }
+                        .thenBy { it.address },
+                )
+            }
             .sortedWith(compareBy<HotspotAddressCandidate> { it.score }.thenBy { it.interfaceName }.thenBy { it.address })
     }
 
@@ -90,4 +111,36 @@ object HotspotAddressDetector {
             "wlan" in interfaceName || "wifi" in interfaceName -> 3
             else -> 10
         }
+
+    internal fun filterActiveCandidates(
+        candidates: List<HotspotAddressCandidate>,
+        activeLinks: Set<ActiveLink>,
+    ): List<HotspotAddressCandidate> {
+        if (candidates.isEmpty() || activeLinks.isEmpty()) {
+            return candidates
+        }
+
+        val activeAddresses = activeLinks.mapTo(mutableSetOf()) { it.address }
+        val filtered = candidates.filter { candidate ->
+            ActiveLink(candidate.interfaceName, candidate.address) in activeLinks || candidate.address in activeAddresses
+        }
+        return if (filtered.isNotEmpty()) filtered else candidates
+    }
+
+    private fun activeLinks(context: Context): Set<ActiveLink> {
+        val connectivityManager = context.getSystemService(ConnectivityManager::class.java) ?: return emptySet()
+        return buildSet {
+            connectivityManager.allNetworks.forEach { network ->
+                val linkProperties = connectivityManager.getLinkProperties(network) ?: return@forEach
+                val interfaceName = linkProperties.interfaceName.orEmpty()
+                for (linkAddress in linkProperties.linkAddresses) {
+                    val ipv4 = linkAddress.address as? Inet4Address ?: continue
+                    val hostAddress = ipv4.hostAddress ?: continue
+                    if (isPrivateIpv4(hostAddress)) {
+                        add(ActiveLink(interfaceName = interfaceName, address = hostAddress))
+                    }
+                }
+            }
+        }
+    }
 }

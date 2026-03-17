@@ -58,6 +58,24 @@ class ProxyConfigValidatorTest {
     }
 
     @Test
+    fun `falls back to detected address when saved local address is stale`() {
+        val result = ProxyConfigValidator.validate(
+            portInput = "8080",
+            advertisedBaseUrlInput = "",
+            selectedLocalAddressInput = "192.168.99.1",
+            debug = false,
+            localCandidates = candidates,
+        )
+
+        assertNull(result.localAddressError)
+        assertEquals("http://192.168.43.1:8080", result.effectiveUrl)
+        assertEquals(
+            "Saved local address is not currently detected. Verify the hotspot/LAN interface before starting.",
+            result.localAddressWarning,
+        )
+    }
+
+    @Test
     fun `warns when manual private ip is not currently detected`() {
         val result = ProxyConfigValidator.validate(
             portInput = "8080",

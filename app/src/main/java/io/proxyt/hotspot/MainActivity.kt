@@ -293,9 +293,16 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         registerNetworkMonitoring()
+        refreshLocalAddressOptions()
         renderStatus()
         startLogObserver()
         renderLogs()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshLocalAddressOptions()
+        renderStatus()
     }
 
     override fun onStop() {

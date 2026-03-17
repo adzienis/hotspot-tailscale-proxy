@@ -7,10 +7,12 @@ import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.isDescendantOfA
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.hamcrest.Matchers.allOf
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -44,7 +46,7 @@ class MainActivityFlowsTest {
     @Test
     fun invalidConfigShowsValidationErrorWithoutStartingService() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
+            onView(tabWithText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.portEdit)).perform(replaceText("70000"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(click())
 
@@ -73,16 +75,18 @@ class MainActivityFlowsTest {
         }
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
+            onView(tabWithText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.baseUrlEdit)).perform(replaceText("http://192.168.43.1:8080"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(click())
-            onView(withText(R.string.tab_quick_start)).perform(click())
+            onView(tabWithText(R.string.tab_quick_start)).perform(click())
 
             onView(withId(R.id.stateValueText)).check(matches(withText(R.string.state_running)))
             onView(withId(R.id.statusUrlText)).check(matches(withText("http://192.168.43.1:8080")))
             assertEquals(1, testRuntime.startCount.get())
         }
     }
+
+    private fun tabWithText(textRes: Int) = allOf(withText(textRes), isDescendantOfA(withId(R.id.mainTabLayout)))
 
     private class RecordingAppRuntime : AppRuntime {
         val startCount = AtomicInteger(0)

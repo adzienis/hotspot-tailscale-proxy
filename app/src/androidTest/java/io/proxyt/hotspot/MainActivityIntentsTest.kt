@@ -4,12 +4,15 @@ import android.content.Intent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.intent.Intents
 import androidx.test.espresso.intent.matcher.IntentMatchers.hasAction
 import androidx.test.espresso.intent.Intents.intended
+import androidx.test.espresso.matcher.ViewMatchers.isDescendantOfA
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.hamcrest.Matchers.allOf
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -34,10 +37,12 @@ class MainActivityIntentsTest {
         runtime.statusStore.appendLog("Serving on http://192.168.43.1:8080")
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
-            onView(withId(R.id.shareLogsButton)).perform(click())
+            onView(tabWithText(R.string.tab_advanced_diagnostics)).perform(click())
+            onView(withId(R.id.shareLogsButton)).perform(scrollTo(), click())
 
             intended(hasAction(Intent.ACTION_CHOOSER))
         }
     }
+
+    private fun tabWithText(textRes: Int) = allOf(withText(textRes), isDescendantOfA(withId(R.id.mainTabLayout)))
 }

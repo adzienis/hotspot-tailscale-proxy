@@ -36,6 +36,7 @@
     <string name="copy_last_error">Copy last error</string>
     <string name="last_error_copied">Last error copied</string>
     <string name="copy_effective_url">Copy control URL</string>
+    <string name="copied_control_url">Copied control URL</string>
     <string name="start_proxy">Start proxy</string>
     <string name="stop_proxy">Stop proxy</string>
     <string name="usage_notes">Point the iPhone Tailscale client at the advertised URL shown above. For hotspot-only use, this should usually be an RFC1918 address like http://192.168.43.1:8080.</string>
@@ -62,4 +63,14 @@
     <string name="notification_permission_continue">Continue</string>
     <string name="notification_permission_settings_message">Notification permission was denied. Open app settings, allow notifications, and then try starting the proxy again.</string>
     <string name="open_settings">Open settings</string>
+    <string name="battery_optimization_label">Battery optimization</string>
+    <string name="battery_optimization_active">Battery optimization is still enabled for this app. Some devices will throttle or stop hotspot proxy traffic unless you exempt the app.</string>
+    <string name="battery_optimization_ignored">Battery optimization is already disabled for this app.</string>
+    <string name="disable_battery_optimization">Disable battery optimization</string>
+    <string name="health_check_failed_title">Proxy failed health check</string>
+    <string name="health_check_failed_detail">The control URL did not answer after the proxy process started.</string>
+    <string name="health_check_failed_action">Refresh the local IP selection, verify the hotspot is active, disable battery optimization for this app, and try again.</string>
+    <string name="notification_action_stop">Stop</string>
+    <string name="notification_action_copy_url">Copy URL</string>
+    <string name="notification_action_clear_error">Clear error</string>
 </resources>

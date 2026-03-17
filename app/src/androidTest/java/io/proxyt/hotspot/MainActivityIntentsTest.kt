@@ -34,7 +34,7 @@ class MainActivityIntentsTest {
         runtime.statusStore.appendLog("Serving on http://192.168.43.1:8080")
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText("Logs")).perform(click())
+            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.shareLogsButton)).perform(click())
 
             intended(hasAction(Intent.ACTION_CHOOSER))

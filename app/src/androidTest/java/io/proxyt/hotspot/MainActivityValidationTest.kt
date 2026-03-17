@@ -21,6 +21,7 @@ class MainActivityValidationTest {
         val runtime = installFakeRuntimeDependencies()
 
         ActivityScenario.launch(MainActivity::class.java).use {
+            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.portEdit)).perform(replaceText("70000"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(click())
 

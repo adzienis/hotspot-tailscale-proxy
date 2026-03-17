@@ -48,12 +48,31 @@ fun Project.resolveAndroidSdkDir(): File {
     )
 }
 
-val supportedGoAbis = listOf(
+val allSupportedGoAbis = listOf(
     GoAndroidAbi(androidAbi = "arm64-v8a", goArch = "arm64"),
     GoAndroidAbi(androidAbi = "armeabi-v7a", goArch = "arm", goArm = "7", requiresNdkToolchain = true),
     GoAndroidAbi(androidAbi = "x86", goArch = "386", requiresNdkToolchain = true),
     GoAndroidAbi(androidAbi = "x86_64", goArch = "amd64", requiresNdkToolchain = true),
 )
+val requestedGoAbiNames = providers.gradleProperty("proxyt.abis")
+    .orNull
+    ?.split(",")
+    ?.map { it.trim() }
+    ?.filter { it.isNotEmpty() }
+    ?.distinct()
+val supportedGoAbis = if (requestedGoAbiNames.isNullOrEmpty()) {
+    allSupportedGoAbis
+} else {
+    val supportedByAbi = allSupportedGoAbis.associateBy { it.androidAbi }
+    val unknownAbis = requestedGoAbiNames.filterNot(supportedByAbi::containsKey)
+    if (unknownAbis.isNotEmpty()) {
+        throw GradleException(
+            "Unknown proxyt.abis entries: ${unknownAbis.joinToString(", ")}. " +
+                "Supported values: ${allSupportedGoAbis.joinToString(", ") { it.androidAbi }}.",
+        )
+    }
+    requestedGoAbiNames.map { supportedByAbi.getValue(it) }
+}
 
 val releaseKeystorePath = providers.gradleProperty("android.release.keystore.path")
     .orElse(providers.environmentVariable("ANDROID_KEYSTORE_PATH"))

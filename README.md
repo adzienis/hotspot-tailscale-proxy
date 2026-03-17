@@ -39,6 +39,14 @@ The Android app launches the packaged `libproxyt.so` directly from `nativeLibrar
 `assembleDebug`, `assembleRelease`, and `installDebug` now depend on this Gradle task automatically.
 The multi-ABI build uses Android NDK `29.0.14206865` for `armeabi-v7a`, `x86`, and `x86_64`.
 
+If you want a faster local debug build, you can limit the generated ABI set:
+
+```bash
+./gradlew -Pproxyt.abis=arm64-v8a :app:assembleDebug
+```
+
+Use a comma-separated list such as `arm64-v8a,x86_64` when you need multiple debug targets. Release builds should be left on the default full ABI matrix.
+
 If you still want a shell entrypoint, `./scripts/build-android-binary.sh` now delegates to the Gradle task above.
 
 ## JDK requirement
@@ -114,5 +122,5 @@ GitHub Actions now runs:
 
 1. `go test ./...` in `upstream-proxyt`
 2. `:app:lintDebug`
-3. `:app:assembleDebug`
+3. `:app:assembleDebug` with `-Pproxyt.abis=arm64-v8a` for a faster verification build
 4. a release build path with minification enabled and optional signing via secrets

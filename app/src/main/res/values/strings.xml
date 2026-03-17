@@ -37,11 +37,15 @@
     <string name="selected_ip_label">Selected IP</string>
     <string name="port_bind_result_label">Port bind result</string>
     <string name="last_probe_result_label">Last probe result</string>
+    <string name="probe_target_label">Probe target</string>
+    <string name="probe_detail_label">Probe detail</string>
     <string name="hotspot_active_label">Hotspot active</string>
     <string name="startup_events_label">Last startup events</string>
     <string name="diagnostics_not_available">Not available yet</string>
     <string name="hotspot_active_yes">Yes</string>
     <string name="hotspot_active_no">No</string>
+    <string name="selected_route_value">Selected route\nInterface: %1$s (%2$s)\nIP: %3$s\nEffective URL: %4$s</string>
+    <string name="selected_route_manual">Manual URL override active\nEffective URL: %1$s</string>
     <string name="listen_port">Listen port</string>
     <string name="port_value">%1$d</string>
     <string name="advertised_url">Advertised base URL</string>

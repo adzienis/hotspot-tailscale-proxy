@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
 data class ResolvedEndpoint(
     val activeUrl: String,
     val selectedInterface: String = "",
+    val selectedInterfaceKind: String = "",
     val selectedIp: String = "",
     val hotspotActive: Boolean? = null,
 )
@@ -37,6 +38,8 @@ object ProxyHealthCheck {
 
 data class ProbeResult(
     val healthy: Boolean,
+    val status: String,
+    val target: String,
     val detail: String,
 )
 
@@ -166,6 +169,7 @@ class ProxyService : Service() {
             return
         }
 
+        ProxyPreferences.startNewLogSession(this)
         val logFile = ProxyPreferences.logFile(this)
         val binary = File(applicationInfo.nativeLibraryDir, NATIVE_BINARY)
         binary.setExecutable(true, true)
@@ -225,7 +229,9 @@ class ProxyService : Service() {
                 activeUrl = resolvedEndpoint.activeUrl,
                 diagnostics = diagnosticsSeed.copy(portBindResult = bindCheck.message),
                 startTimestampMs = startTimestamp,
-                probeDetail = "Local HTTP probe pending: $localProbeUrl",
+                probeStatus = "Pending",
+                probeTarget = localProbeUrl,
+                probeDetail = "Waiting for the local HTTP health check to succeed.",
             ),
         )
         sendStatusBroadcast()
@@ -280,6 +286,8 @@ class ProxyService : Service() {
                             error = healthError,
                             startTimestampMs = startTimestamp,
                             lastExitCode = runCatching { startedProcess.exitValue() }.getOrNull(),
+                            probeStatus = probeResult.status,
+                            probeTarget = probeResult.target,
                             probeDetail = probeResult.detail,
                         ),
                     )
@@ -297,8 +305,10 @@ class ProxyService : Service() {
                         startTimestampMs = startTimestamp,
                         processPid = processPid,
                         diagnostics = diagnosticsSeed,
-                        probeDetail = probeResult.detail,
                         port = config.port,
+                        probeStatus = probeResult.status,
+                        probeTarget = probeResult.target,
+                        probeDetail = probeResult.detail,
                     ),
                 )
                 ProxyPreferences.appendLog(
@@ -396,7 +406,7 @@ class ProxyService : Service() {
                 error = null,
                 diagnostics = currentStatus.diagnostics.copy(
                     currentPid = safeProcessPid(runningProcess),
-                    lastProbeResult = currentStatus.diagnostics.lastProbeResult.ifBlank { "No probe recorded" },
+                    lastProbeDetail = currentStatus.diagnostics.lastProbeDetail.ifBlank { "No probe recorded" },
                 ),
             ),
         )
@@ -433,10 +443,12 @@ class ProxyService : Service() {
             else -> localCandidates.firstOrNull()?.address.orEmpty()
         }
         val selectedInterface = localCandidates.firstOrNull { it.address == selectedIp }?.interfaceName.orEmpty()
+        val selectedInterfaceKind = localCandidates.firstOrNull { it.address == selectedIp }?.kind.orEmpty()
         val hotspotActive = localCandidates.any { it.kind == "Hotspot" || it.kind == "USB tethering" }
         return ResolvedEndpoint(
             activeUrl = activeUrl,
             selectedInterface = selectedInterface,
+            selectedInterfaceKind = selectedInterfaceKind,
             selectedIp = selectedIp,
             hotspotActive = hotspotActive,
         )
@@ -488,6 +500,7 @@ class ProxyService : Service() {
         }
         return ProxyDiagnostics(
             selectedInterface = selectedInterface,
+            selectedInterfaceKind = endpoint.selectedInterfaceKind,
             selectedIp = endpoint.selectedIp,
             hotspotActive = endpoint.hotspotActive,
         )
@@ -537,6 +550,8 @@ class ProxyService : Service() {
 
     private data class HealthCheckResult(
         val error: ProxyErrorInfo?,
+        val status: String,
+        val target: String,
         val detail: String,
     )
 
@@ -547,12 +562,13 @@ class ProxyService : Service() {
         advertisedUrl: String,
     ): HealthCheckResult {
         var lastProbeDetail = "Local HTTP probe pending: $localProbeUrl"
+        var lastProbeStatus = "Pending"
         repeat(8) { attempt ->
             if (stopRequested) {
-                return HealthCheckResult(error = null, detail = "Health check cancelled")
+                return HealthCheckResult(error = null, status = "Cancelled", target = localProbeUrl, detail = "Health check cancelled")
             }
             if (process !== startedProcess) {
-                return HealthCheckResult(error = null, detail = "Health check superseded")
+                return HealthCheckResult(error = null, status = "Superseded", target = localProbeUrl, detail = "Health check superseded")
             }
             if (!startedProcess.isAlive) {
                 val exitCode = runCatching { startedProcess.exitValue() }.getOrNull()
@@ -562,13 +578,21 @@ class ProxyService : Service() {
                         exitCode = exitCode,
                         logTail = ProxyPreferences.readLogTail(this, 4_000),
                     ),
+                    status = lastProbeStatus,
+                    target = localProbeUrl,
                     detail = lastProbeDetail,
                 )
             }
             val probeResult = probeLocalProxy(localProbePort, localProbeUrl)
             lastProbeDetail = probeResult.detail
+            lastProbeStatus = probeResult.status
             if (probeResult.healthy) {
-                return HealthCheckResult(error = null, detail = probeResult.detail)
+                return HealthCheckResult(
+                    error = null,
+                    status = probeResult.status,
+                    target = probeResult.target,
+                    detail = probeResult.detail,
+                )
             }
             if (attempt < 7) {
                 Thread.sleep(750)
@@ -586,10 +610,12 @@ class ProxyService : Service() {
             error = ProxyErrorInfo(
                 category = ProxyErrorCategory.STARTUP_FAILURE,
                 title = getString(R.string.health_check_failed_title),
-                detail = "${getString(R.string.health_check_failed_detail)} Local probe: $localProbeUrl. Advertised URL: $advertisedUrl. Last probe result: $lastProbeDetail",
+                detail = "${getString(R.string.health_check_failed_detail)} Local probe: $localProbeUrl. Advertised URL: $advertisedUrl. Last probe status: $lastProbeStatus. Last probe result: $lastProbeDetail",
                 recommendedAction = getString(R.string.health_check_failed_action),
             ),
-            detail = lastProbeDetail,
+            status = lastProbeStatus,
+            target = localProbeUrl,
+            detail = "$lastProbeStatus: $lastProbeDetail",
         )
     }
 
@@ -603,19 +629,28 @@ class ProxyService : Service() {
         if (tcpResult.healthy) {
             return ProbeResult(
                 healthy = true,
+                status = "Healthy via TCP fallback",
+                target = "tcp://127.0.0.1:$port",
                 detail = "Local TCP probe to 127.0.0.1:$port succeeded after HTTP probe failed: ${httpResult.detail}",
             )
         }
 
         return ProbeResult(
             healthy = false,
+            status = "Failed",
+            target = httpResult.target,
             detail = "${httpResult.detail}; ${tcpResult.detail}",
         )
     }
 
     private fun probeUrl(url: String): ProbeResult {
         if (url.isBlank()) {
-            return ProbeResult(healthy = false, detail = "Local HTTP probe skipped: blank URL")
+            return ProbeResult(
+                healthy = false,
+                status = "Skipped",
+                target = url,
+                detail = "Local HTTP probe skipped: blank URL",
+            )
         }
 
         return runCatching {
@@ -630,6 +665,8 @@ class ProxyService : Service() {
                 val code = connection.responseCode
                 ProbeResult(
                     healthy = code in 100..599,
+                    status = if (code in 200..299) "Healthy" else "Unhealthy",
+                    target = url,
                     detail = "Local HTTP probe to $url returned $code",
                 )
             } finally {
@@ -638,6 +675,8 @@ class ProxyService : Service() {
         }.getOrElse { error ->
             ProbeResult(
                 healthy = false,
+                status = "Failed",
+                target = url,
                 detail = "Local HTTP probe to $url failed: ${error.javaClass.simpleName}${error.message?.let { ": $it" }.orEmpty()}",
             )
         }
@@ -650,11 +689,15 @@ class ProxyService : Service() {
             }
             ProbeResult(
                 healthy = true,
+                status = "Healthy",
+                target = "tcp://127.0.0.1:$port",
                 detail = "Local TCP probe to 127.0.0.1:$port succeeded",
             )
         }.getOrElse { error ->
             ProbeResult(
                 healthy = false,
+                status = "Failed",
+                target = "tcp://127.0.0.1:$port",
                 detail = "Local TCP probe to 127.0.0.1:$port failed: ${error.javaClass.simpleName}${error.message?.let { ": $it" }.orEmpty()}",
             )
         }

@@ -5,19 +5,16 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.widget.ArrayAdapter
@@ -26,7 +23,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
-import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.checkbox.MaterialCheckBox
@@ -80,9 +76,6 @@ class MainActivity : AppCompatActivity() {
 
     private val connectivityManager: ConnectivityManager? by lazy {
         getSystemService(ConnectivityManager::class.java)
-    }
-    private val powerManager: PowerManager? by lazy {
-        getSystemService(PowerManager::class.java)
     }
 
     private var latestStatus: ProxyStatus? = null
@@ -277,11 +270,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         stopButton.setOnClickListener {
-            startService(
-                Intent(this, ProxyService::class.java).apply {
-                    action = ProxyService.ACTION_STOP
-                },
-            )
+            appRuntime().stopProxyService(this)
         }
 
         renderStatus()
@@ -313,6 +302,8 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    private fun appRuntime(): AppRuntime = AppRuntimeHooks.delegate
+
     private fun requestNotificationPermissionThenStart(config: ProxyConfig) {
         if (hasNotificationPermission()) {
             startProxyService(config)
@@ -335,16 +326,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startProxyService(config: ProxyConfig) {
-        ContextCompat.startForegroundService(
-            this,
-            Intent(this, ProxyService::class.java).apply {
-                action = ProxyService.ACTION_START
-                putExtra(ProxyService.EXTRA_PORT, config.port)
-                putExtra(ProxyService.EXTRA_ADVERTISED_BASE_URL, config.advertisedBaseUrl)
-                putExtra(ProxyService.EXTRA_SELECTED_LOCAL_ADDRESS, config.selectedLocalAddress)
-                putExtra(ProxyService.EXTRA_DEBUG, config.debug)
-            },
-        )
+        appRuntime().startProxyService(this, config)
     }
 
     private fun persistNotificationPermissionFailure(config: ProxyConfig) {
@@ -387,10 +369,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hasNotificationPermission(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            return true
-        }
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        return appRuntime().hasNotificationPermission(this)
     }
 
     private fun setupTabs() {
@@ -682,7 +661,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isIgnoringBatteryOptimizations(): Boolean =
-        powerManager?.isIgnoringBatteryOptimizations(packageName) == true
+        appRuntime().isIgnoringBatteryOptimizations(this)
 
     private fun requestBatteryOptimizationExemption() {
         val requestIntent = Intent(

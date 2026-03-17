@@ -23,7 +23,7 @@ The intended flow is:
 ## Build the bundled Go binaries
 
 ```bash
-./gradlew :app:buildGoAndroidBinaries
+./gradlew buildAndroidGoBinaries
 ```
 
 That produces generated binaries for:
@@ -36,7 +36,7 @@ app/build/generated/jniLibs/proxyt/x86_64/libproxyt.so
 ```
 
 The Android app launches the packaged `libproxyt.so` directly from `nativeLibraryDir`.
-`assembleDebug`, `assembleRelease`, and `installDebug` now depend on this Gradle task automatically.
+`assembleAndroidDebug`, `assembleAndroidRelease`, `:app:installDebug`, and `verifyAndroidPr` all depend on this packaging path automatically.
 The multi-ABI build uses Android NDK `29.0.14206865` for `armeabi-v7a`, `x86`, and `x86_64`.
 
 If you want a faster local debug build, you can limit the generated ABI set:
@@ -47,7 +47,7 @@ If you want a faster local debug build, you can limit the generated ABI set:
 
 Use a comma-separated list such as `arm64-v8a,x86_64` when you need multiple debug targets. Release builds should be left on the default full ABI matrix.
 
-If you still want a shell entrypoint, `./scripts/build-android-binary.sh` now delegates to the Gradle task above.
+The old `scripts/build-android-binary.sh` wrapper is no longer needed; Go packaging is driven directly from Gradle now.
 
 ## JDK requirement
 
@@ -77,8 +77,30 @@ android.release.key.password       / ANDROID_KEY_PASSWORD
 Then run:
 
 ```bash
-./gradlew :app:assembleRelease
+./gradlew assembleAndroidRelease
 ```
+
+## Reproducible release path
+
+Use the same Gradle-first path locally that CI uses for verification and release assembly:
+
+1. Check out a clean commit and make sure `upstream-proxyt/` is at the revision you intend to ship.
+2. Install Android SDK platform `android-35`, build-tools `35.0.0`, and NDK `29.0.14206865`.
+3. Point `JAVA_HOME` at a standard JDK 17 install.
+4. Provide signing inputs with either Gradle properties or the documented `ANDROID_*` environment variables.
+5. Run the release build from a clean tree:
+
+```bash
+./gradlew clean buildAndroidGoBinaries assembleAndroidRelease
+```
+
+6. Record checksums for the generated artifacts:
+
+```bash
+shasum -a 256 app/build/outputs/apk/release/*.apk
+```
+
+If signing variables are omitted, the same command still gives you an unsigned reproducible release artifact for verification.
 
 ## Open in Android Studio
 
@@ -118,9 +140,8 @@ On the phone, make sure:
 
 ## CI
 
-GitHub Actions now runs:
+GitHub Actions now runs on every pull request:
 
 1. `go test ./...` in `upstream-proxyt`
-2. `:app:lintDebug`
-3. `:app:assembleDebug` with `-Pproxyt.abis=arm64-v8a` for a faster verification build
-4. a release build path with minification enabled and optional signing via secrets
+2. `./gradlew -Pproxyt.abis=arm64-v8a verifyAndroidPr`, which covers `:app:testDebugUnitTest`, `:app:lintDebug`, and `:app:assembleDebug`
+3. a release build path with minification enabled and optional signing via secrets on manual dispatch

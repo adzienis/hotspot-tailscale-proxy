@@ -72,13 +72,33 @@
                     android:text="@string/stop_proxy" />
             </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/copyUrlButton"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="@string/copy_effective_url" />
+                android:gravity="center_horizontal"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/copyUrlButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/copy_effective_url" />
+
+                <Space
+                    android:layout_width="12dp"
+                    android:layout_height="1dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/shareDiagnosticsButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/share_diagnostics" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
@@ -98,42 +118,22 @@
         android:layout_weight="1">
 
         <androidx.core.widget.NestedScrollView
-            android:id="@+id/overviewTabContent"
+            android:id="@+id/quickStartTabContent"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true">
 
-            <include layout="@layout/tab_content_overview" />
+            <include layout="@layout/tab_content_quick_start" />
         </androidx.core.widget.NestedScrollView>
 
         <androidx.core.widget.NestedScrollView
-            android:id="@+id/configureTabContent"
+            android:id="@+id/advancedDiagnosticsTabContent"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:fillViewport="true"
             android:visibility="gone">
 
-            <include layout="@layout/tab_content_configure" />
-        </androidx.core.widget.NestedScrollView>
-
-        <androidx.core.widget.NestedScrollView
-            android:id="@+id/diagnosticsTabContent"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fillViewport="true"
-            android:visibility="gone">
-
-            <include layout="@layout/tab_content_diagnostics" />
-        </androidx.core.widget.NestedScrollView>
-
-        <androidx.core.widget.NestedScrollView
-            android:id="@+id/logsTabContent"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fillViewport="true"
-            android:visibility="gone">
-
-            <include layout="@layout/tab_content_logs" />
+            <include layout="@layout/tab_content_advanced_diagnostics" />
         </androidx.core.widget.NestedScrollView>
     </FrameLayout>
 </LinearLayout>

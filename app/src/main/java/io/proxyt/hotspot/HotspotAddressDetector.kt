@@ -44,6 +44,10 @@ object HotspotAddressDetector {
             }
         }
 
+        return rankCandidates(candidates)
+    }
+
+    internal fun rankCandidates(candidates: List<HotspotAddressCandidate>): List<HotspotAddressCandidate> {
         return candidates
             .distinctBy { "${it.interfaceName}:${it.address}" }
             .sortedWith(compareBy<HotspotAddressCandidate> { it.score }.thenBy { it.interfaceName }.thenBy { it.address })

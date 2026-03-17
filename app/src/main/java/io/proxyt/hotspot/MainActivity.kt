@@ -6,11 +6,17 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.widget.ArrayAdapter
@@ -36,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var lastExitCodeView: TextView
     private lateinit var nextActionView: TextView
     private lateinit var detectedAddressView: TextView
+    private lateinit var batteryOptimizationView: TextView
     private lateinit var logView: TextView
     private lateinit var portLayout: TextInputLayout
     private lateinit var portEdit: TextInputEditText
@@ -48,12 +55,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var stopButton: MaterialButton
     private lateinit var copyLastErrorButton: MaterialButton
     private lateinit var copyUrlButton: MaterialButton
+    private lateinit var batteryOptimizationButton: MaterialButton
+
+    private val connectivityManager: ConnectivityManager? by lazy {
+        getSystemService(ConnectivityManager::class.java)
+    }
+    private val powerManager: PowerManager? by lazy {
+        getSystemService(PowerManager::class.java)
+    }
 
     private var latestStatus: ProxyStatus? = null
     private var pendingStartConfig: ProxyConfig? = null
     private lateinit var statusPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener
     private var localCandidates: List<HotspotAddressCandidate> = emptyList()
     private var suppressValidationCallbacks = false
+    private var networkCallbackRegistered = false
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -71,11 +87,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val batteryOptimizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        renderStatus()
+    }
+
     private val refreshHandler = Handler(Looper.getMainLooper())
     private val refreshRunnable = object : Runnable {
         override fun run() {
             renderLogs()
             refreshHandler.postDelayed(this, 2_000)
+        }
+    }
+
+    private val networkRefreshRunnable = Runnable {
+        refreshLocalAddressOptions()
+        renderStatus()
+    }
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            scheduleLocalAddressRefresh()
+        }
+
+        override fun onLost(network: Network) {
+            scheduleLocalAddressRefresh()
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            scheduleLocalAddressRefresh()
+        }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            scheduleLocalAddressRefresh()
         }
     }
 
@@ -91,6 +136,7 @@ class MainActivity : AppCompatActivity() {
         lastExitCodeView = findViewById(R.id.lastExitCodeText)
         nextActionView = findViewById(R.id.nextActionText)
         detectedAddressView = findViewById(R.id.detectedAddressText)
+        batteryOptimizationView = findViewById(R.id.batteryOptimizationText)
         logView = findViewById(R.id.logText)
         portLayout = findViewById(R.id.portLayout)
         portEdit = findViewById(R.id.portEdit)
@@ -103,6 +149,7 @@ class MainActivity : AppCompatActivity() {
         stopButton = findViewById(R.id.stopButton)
         copyLastErrorButton = findViewById(R.id.copyLastErrorButton)
         copyUrlButton = findViewById(R.id.copyUrlButton)
+        batteryOptimizationButton = findViewById(R.id.batteryOptimizationButton)
 
         ProxyPreferences.reconcileStatus(this)
         statusPreferenceListener = ProxyPreferences.registerStatusListener(this) {
@@ -149,7 +196,11 @@ class MainActivity : AppCompatActivity() {
             }
             val clipboard = getSystemService(ClipboardManager::class.java)
             clipboard.setPrimaryClip(ClipData.newPlainText("Proxy control URL", effectiveUrl))
-            Toast.makeText(this, "Copied control URL", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.copied_control_url, Toast.LENGTH_SHORT).show()
+        }
+
+        batteryOptimizationButton.setOnClickListener {
+            requestBatteryOptimizationExemption()
         }
 
         portEdit.doAfterTextChanged {
@@ -192,11 +243,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        registerNetworkMonitoring()
         renderStatus()
         refreshHandler.post(refreshRunnable)
     }
 
     override fun onStop() {
+        unregisterNetworkMonitoring()
+        refreshHandler.removeCallbacks(networkRefreshRunnable)
         refreshHandler.removeCallbacks(refreshRunnable)
         super.onStop()
     }
@@ -380,12 +434,24 @@ class MainActivity : AppCompatActivity() {
         nextActionView.text = visibleError?.recommendedAction ?: defaultRecommendedAction(status)
         copyLastErrorButton.visibility = if (buildClipboardError(status) == null) View.GONE else View.VISIBLE
 
+        renderBatteryOptimizationGuidance()
+
         startButton.isEnabled = status.state != ProxyRuntimeState.Starting && status.state != ProxyRuntimeState.Running
         stopButton.isEnabled = status.desiredRunning || status.isActive
     }
 
     private fun renderLogs() {
         logView.text = ProxyPreferences.readLogTail(this)
+    }
+
+    private fun renderBatteryOptimizationGuidance() {
+        val ignoring = isIgnoringBatteryOptimizations()
+        batteryOptimizationView.text = if (ignoring) {
+            getString(R.string.battery_optimization_ignored)
+        } else {
+            getString(R.string.battery_optimization_active)
+        }
+        batteryOptimizationButton.visibility = if (ignoring) View.GONE else View.VISIBLE
     }
 
     private fun stateLabel(status: ProxyStatus): String =
@@ -423,6 +489,7 @@ class MainActivity : AppCompatActivity() {
         when {
             status.error != null -> status.error.recommendedAction
             !hasNotificationPermission() -> getString(R.string.notification_permission_required_message)
+            !isIgnoringBatteryOptimizations() -> getString(R.string.battery_optimization_active)
             status.state == ProxyRuntimeState.Running -> getString(R.string.next_action_running)
             else -> getString(R.string.next_action_idle)
         }
@@ -452,5 +519,50 @@ class MainActivity : AppCompatActivity() {
                 append(action)
             }
         }
+    }
+
+    private fun registerNetworkMonitoring() {
+        if (networkCallbackRegistered) {
+            return
+        }
+        val manager = connectivityManager ?: return
+        val request = NetworkRequest.Builder().build()
+        runCatching {
+            manager.registerNetworkCallback(request, networkCallback)
+            networkCallbackRegistered = true
+        }
+    }
+
+    private fun unregisterNetworkMonitoring() {
+        if (!networkCallbackRegistered) {
+            return
+        }
+        val manager = connectivityManager ?: return
+        runCatching {
+            manager.unregisterNetworkCallback(networkCallback)
+        }
+        networkCallbackRegistered = false
+    }
+
+    private fun scheduleLocalAddressRefresh() {
+        refreshHandler.removeCallbacks(networkRefreshRunnable)
+        refreshHandler.postDelayed(networkRefreshRunnable, 500)
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean =
+        powerManager?.isIgnoringBatteryOptimizations(packageName) == true
+
+    private fun requestBatteryOptimizationExemption() {
+        val requestIntent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName"),
+        )
+        val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        val launchIntent = when {
+            requestIntent.resolveActivity(packageManager) != null -> requestIntent
+            fallbackIntent.resolveActivity(packageManager) != null -> fallbackIntent
+            else -> return
+        }
+        batteryOptimizationLauncher.launch(launchIntent)
     }
 }

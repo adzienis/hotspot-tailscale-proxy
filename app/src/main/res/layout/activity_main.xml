@@ -295,6 +295,38 @@
                 android:text="@string/stop_proxy" />
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/panel_background"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/battery_optimization_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/batteryOptimizationText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/batteryOptimizationButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/disable_battery_optimization" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

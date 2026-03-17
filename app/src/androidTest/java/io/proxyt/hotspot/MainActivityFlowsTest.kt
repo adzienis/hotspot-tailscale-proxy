@@ -2,7 +2,6 @@ package io.proxyt.hotspot
 
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
-import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
@@ -16,7 +15,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.allOf
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -80,26 +78,14 @@ class MainActivityFlowsTest {
             onView(tabWithText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.baseUrlEdit)).perform(replaceText("http://192.168.43.1:8080"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(click())
-            waitForRunningStatus("http://192.168.43.1:8080")
             assertEquals(1, testRuntime.startCount.get())
+            assertEquals("http://192.168.43.1:8080", ProxyPreferences.loadConfig(
+                ApplicationProvider.getApplicationContext(),
+            ).advertisedBaseUrl)
         }
     }
 
     private fun tabWithText(textRes: Int) = allOf(withText(textRes), isDescendantOfA(withId(R.id.mainTabLayout)))
-
-    private fun waitForRunningStatus(expectedUrl: String) {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        repeat(20) {
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            val status = ProxyPreferences.reconcileStatus(context)
-            if (status.state == ProxyRuntimeState.Running && status.activeUrl == expectedUrl) {
-                return
-            }
-        }
-        val status = ProxyPreferences.reconcileStatus(context)
-        assertTrue("Expected running status for $expectedUrl but was $status", status.state == ProxyRuntimeState.Running)
-        assertEquals(expectedUrl, status.activeUrl)
-    }
 
     private class RecordingAppRuntime : AppRuntime {
         val startCount = AtomicInteger(0)

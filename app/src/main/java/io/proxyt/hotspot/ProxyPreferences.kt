@@ -40,6 +40,15 @@ data class ProxyErrorInfo(
     val recommendedAction: String,
 )
 
+data class ProxyDiagnostics(
+    val currentPid: Long? = null,
+    val selectedInterface: String = "",
+    val selectedIp: String = "",
+    val portBindResult: String = "",
+    val lastProbeResult: String = "",
+    val hotspotActive: Boolean? = null,
+)
+
 data class ProxyStatus(
     val desiredRunning: Boolean = false,
     val state: ProxyRuntimeState = ProxyRuntimeState.Idle,
@@ -50,17 +59,21 @@ data class ProxyStatus(
     val startTimestampMs: Long? = null,
     val lastSuccessfulStartTimestampMs: Long? = null,
     val error: ProxyErrorInfo? = null,
+    val diagnostics: ProxyDiagnostics = ProxyDiagnostics(),
 ) {
     val isActive: Boolean
         get() = state == ProxyRuntimeState.Starting || state == ProxyRuntimeState.Running || state == ProxyRuntimeState.Stopping
 }
 
 object ProxyPreferences {
+    private const val PREFS_VERSION = 2
     private const val NAME = "proxy_preferences"
+    private const val KEY_PREFS_VERSION = "prefs_version"
     private const val KEY_PORT = "port"
     private const val KEY_ADVERTISED_BASE_URL = "advertised_base_url"
     private const val KEY_SELECTED_LOCAL_ADDRESS = "selected_local_address"
     private const val KEY_DEBUG = "debug"
+    private const val KEY_RUNNING = "running"
     private const val KEY_DESIRED_RUNNING = "desired_running"
     private const val KEY_STATE = "state"
     private const val KEY_ACTIVE_URL = "active_url"
@@ -73,8 +86,16 @@ object ProxyPreferences {
     private const val KEY_ERROR_TITLE = "error_title"
     private const val KEY_ERROR_DETAIL = "error_detail"
     private const val KEY_ERROR_ACTION = "error_action"
+    private const val KEY_CURRENT_PID = "current_pid"
+    private const val KEY_SELECTED_INTERFACE = "selected_interface"
+    private const val KEY_SELECTED_IP = "selected_ip"
+    private const val KEY_PORT_BIND_RESULT = "port_bind_result"
+    private const val KEY_LAST_PROBE_RESULT = "last_probe_result"
+    private const val KEY_HOTSPOT_ACTIVE = "hotspot_active"
     private const val LOG_MAX_BYTES = 256_000L
     private const val LOG_KEEP_BYTES = 192_000
+    private const val STARTUP_EVENT_DEFAULT = "No recent startup events."
+    private val LEGACY_KEYS = setOf(KEY_RUNNING)
     private val STATUS_KEYS = setOf(
         KEY_DESIRED_RUNNING,
         KEY_STATE,
@@ -88,10 +109,16 @@ object ProxyPreferences {
         KEY_ERROR_TITLE,
         KEY_ERROR_DETAIL,
         KEY_ERROR_ACTION,
+        KEY_CURRENT_PID,
+        KEY_SELECTED_INTERFACE,
+        KEY_SELECTED_IP,
+        KEY_PORT_BIND_RESULT,
+        KEY_LAST_PROBE_RESULT,
+        KEY_HOTSPOT_ACTIVE,
     )
 
     fun loadConfig(context: Context): ProxyConfig {
-        val preferences = preferences(context)
+        val preferences = preferences(context).also(::migrateIfNeeded)
         return ProxyConfig(
             port = preferences.getInt(KEY_PORT, 8080),
             advertisedBaseUrl = preferences.getString(KEY_ADVERTISED_BASE_URL, "").orEmpty(),
@@ -101,7 +128,7 @@ object ProxyPreferences {
     }
 
     fun saveConfig(context: Context, config: ProxyConfig) {
-        preferences(context).edit()
+        preferences(context).also(::migrateIfNeeded).edit()
             .putInt(KEY_PORT, config.port)
             .putString(KEY_ADVERTISED_BASE_URL, config.advertisedBaseUrl)
             .putString(KEY_SELECTED_LOCAL_ADDRESS, config.selectedLocalAddress)
@@ -110,7 +137,7 @@ object ProxyPreferences {
     }
 
     fun readStatus(context: Context): ProxyStatus {
-        val preferences = preferences(context)
+        val preferences = preferences(context).also(::migrateIfNeeded)
         return ProxyStatus(
             desiredRunning = preferences.getBoolean(KEY_DESIRED_RUNNING, false),
             state = preferences.getString(KEY_STATE, ProxyRuntimeState.Idle.name)
@@ -135,11 +162,12 @@ object ProxyPreferences {
                 null
             },
             error = readError(preferences),
+            diagnostics = readDiagnostics(preferences),
         )
     }
 
     fun setStatus(context: Context, status: ProxyStatus) {
-        val editor = preferences(context).edit()
+        val editor = preferences(context).also(::migrateIfNeeded).edit()
             .putBoolean(KEY_DESIRED_RUNNING, status.desiredRunning)
             .putString(KEY_STATE, status.state.name)
             .putString(KEY_ACTIVE_URL, status.activeUrl)
@@ -174,6 +202,21 @@ object ProxyPreferences {
             editor.putString(KEY_ERROR_TITLE, status.error.title)
             editor.putString(KEY_ERROR_DETAIL, status.error.detail)
             editor.putString(KEY_ERROR_ACTION, status.error.recommendedAction)
+        }
+
+        if (status.diagnostics.currentPid == null) {
+            editor.remove(KEY_CURRENT_PID)
+        } else {
+            editor.putLong(KEY_CURRENT_PID, status.diagnostics.currentPid)
+        }
+        editor.putString(KEY_SELECTED_INTERFACE, status.diagnostics.selectedInterface)
+        editor.putString(KEY_SELECTED_IP, status.diagnostics.selectedIp)
+        editor.putString(KEY_PORT_BIND_RESULT, status.diagnostics.portBindResult)
+        editor.putString(KEY_LAST_PROBE_RESULT, status.diagnostics.lastProbeResult)
+        if (status.diagnostics.hotspotActive == null) {
+            editor.remove(KEY_HOTSPOT_ACTIVE)
+        } else {
+            editor.putBoolean(KEY_HOTSPOT_ACTIVE, status.diagnostics.hotspotActive)
         }
 
         editor.apply()
@@ -223,6 +266,19 @@ object ProxyPreferences {
 
     fun clearLogs(context: Context) {
         logFile(context).writeText("")
+    }
+
+    fun readStartupEventSummary(context: Context, maxEvents: Int = 5): String {
+        val logText = readLogTail(context, maxChars = 24_000)
+        if (logText == "No logs yet.") {
+            return STARTUP_EVENT_DEFAULT
+        }
+
+        val events = extractStartupEvents(logText)
+        if (events.isEmpty()) {
+            return STARTUP_EVENT_DEFAULT
+        }
+        return events.takeLast(maxEvents).joinToString(separator = "\n")
     }
 
     fun registerStatusListener(
@@ -282,6 +338,58 @@ object ProxyPreferences {
             detail = detail,
             recommendedAction = recommendedAction,
         )
+    }
+
+    private fun readDiagnostics(preferences: SharedPreferences): ProxyDiagnostics =
+        ProxyDiagnostics(
+            currentPid = if (preferences.contains(KEY_CURRENT_PID)) {
+                preferences.getLong(KEY_CURRENT_PID, 0L)
+            } else {
+                null
+            },
+            selectedInterface = preferences.getString(KEY_SELECTED_INTERFACE, "").orEmpty(),
+            selectedIp = preferences.getString(KEY_SELECTED_IP, "").orEmpty(),
+            portBindResult = preferences.getString(KEY_PORT_BIND_RESULT, "").orEmpty(),
+            lastProbeResult = preferences.getString(KEY_LAST_PROBE_RESULT, "").orEmpty(),
+            hotspotActive = if (preferences.contains(KEY_HOTSPOT_ACTIVE)) {
+                preferences.getBoolean(KEY_HOTSPOT_ACTIVE, false)
+            } else {
+                null
+            },
+        )
+
+    private fun extractStartupEvents(logText: String): List<String> {
+        return logText.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filter { line ->
+                val lowercase = line.lowercase(Locale.US)
+                "starting proxy" in lowercase ||
+                    "preflight" in lowercase ||
+                    "probe" in lowercase ||
+                    "serving on" in lowercase ||
+                    "start blocked" in lowercase ||
+                    "failed to start" in lowercase ||
+                    "port " in lowercase
+            }
+            .toList()
+    }
+
+    private fun migrateIfNeeded(preferences: SharedPreferences) {
+        val version = preferences.getInt(KEY_PREFS_VERSION, 0)
+        if (version >= PREFS_VERSION) {
+            return
+        }
+
+        val editor = preferences.edit()
+        if (version < 1 && preferences.contains(KEY_RUNNING) && !preferences.contains(KEY_STATE)) {
+            val wasRunning = preferences.getBoolean(KEY_RUNNING, false)
+            editor.putBoolean(KEY_DESIRED_RUNNING, wasRunning)
+            editor.putString(KEY_STATE, if (wasRunning) ProxyRuntimeState.Running.name else ProxyRuntimeState.Idle.name)
+        }
+        LEGACY_KEYS.forEach(editor::remove)
+        editor.putInt(KEY_PREFS_VERSION, PREFS_VERSION)
+        editor.apply()
     }
 
     private fun isProxyServiceRunning(context: Context): Boolean {

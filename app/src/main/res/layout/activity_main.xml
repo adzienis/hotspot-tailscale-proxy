@@ -166,6 +166,129 @@
             android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
             android:textColor="@color/proxy_ink" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/panel_background"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/diagnostics_panel_title"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/current_pid_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/currentPidText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/selected_interface_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/selectedInterfaceText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/selected_ip_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/selectedIpText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/port_bind_result_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/portBindResultText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/last_probe_result_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/lastProbeResultText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/hotspot_active_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/hotspotActiveText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/startup_events_label"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+                android:textColor="@color/proxy_muted" />
+
+            <TextView
+                android:id="@+id/startupEventsText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+                android:textColor="@color/proxy_ink" />
+        </LinearLayout>
+
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/portLayout"
             android:layout_width="match_parent"
@@ -258,6 +381,14 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:text="@string/clear_logs" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/shareLogsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/share_logs" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/copyUrlButton"

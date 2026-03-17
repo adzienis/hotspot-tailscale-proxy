@@ -1,0 +1,63 @@
+name: PR Auto Rebase
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pr-auto-rebase-main
+  cancel-in-progress: false
+
+jobs:
+  rebase-open-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase stale pull requests onto main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" \
+            --jq '.[] | select(.head.repo != null and .head.repo.full_name == .base.repo.full_name) | [.number, .head.ref, .head.sha] | @tsv' \
+            | while IFS=$'\t' read -r pr_number branch_name head_sha; do
+                echo "Checking PR #$pr_number branch $branch_name"
+
+                git fetch origin main "$branch_name"
+
+                if git merge-base --is-ancestor origin/main "origin/$branch_name"; then
+                  echo "Branch $branch_name already contains origin/main"
+                  continue
+                fi
+
+                tmp_branch="autobot/rebase-$pr_number"
+                git checkout -B "$tmp_branch" "origin/$branch_name"
+
+                if git rebase origin/main; then
+                  git push --force-with-lease=refs/heads/$branch_name:$head_sha origin "HEAD:refs/heads/$branch_name"
+                  gh pr comment "$pr_number" --repo "$REPO" --body "Rebased automatically onto the latest \`main\`."
+                  echo "Rebased PR #$pr_number successfully"
+                else
+                  git rebase --abort || true
+                  git reset --hard "origin/$branch_name"
+                  gh pr comment "$pr_number" --repo "$REPO" --body "Automatic rebase onto \`main\` failed due to conflicts. Rebase this branch locally and push again."
+                  echo "Automatic rebase failed for PR #$pr_number"
+                fi
+              done

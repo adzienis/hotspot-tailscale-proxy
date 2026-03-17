@@ -35,6 +35,7 @@
     <string name="current_pid_label">Current PID</string>
     <string name="selected_interface_label">Selected interface</string>
     <string name="selected_ip_label">Selected IP</string>
+    <string name="selected_route_label">Selected route</string>
     <string name="port_bind_result_label">Port bind result</string>
     <string name="last_probe_result_label">Last probe result</string>
     <string name="probe_target_label">Probe target</string>

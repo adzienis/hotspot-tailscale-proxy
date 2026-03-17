@@ -13,4 +13,10 @@
     <string name="usage_notes">Point the iPhone Tailscale client at the advertised URL shown above. For hotspot-only use, this should usually be an RFC1918 address like http://192.168.43.1:8080.</string>
     <string name="detected_address_missing">No private hotspot/LAN IPv4 address detected yet. You can still enter the advertised URL manually.</string>
     <string name="detected_address_value">Detected private IPv4: %1$s\nSuggested control URL: http://%1$s:%2$s</string>
+    <string name="notification_permission_required_title">Notifications required</string>
+    <string name="notification_permission_required_short">Notification permission required before starting the proxy</string>
+    <string name="notification_permission_required_message">This app depends on foreground-service notifications. Grant notification permission on Android 13 or newer before starting the proxy.</string>
+    <string name="notification_permission_continue">Continue</string>
+    <string name="notification_permission_settings_message">Notification permission was denied. Open app settings, allow notifications, and then try starting the proxy again.</string>
+    <string name="open_settings">Open settings</string>
 </resources>

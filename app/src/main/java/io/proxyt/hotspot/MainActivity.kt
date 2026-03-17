@@ -493,9 +493,9 @@ class MainActivity : AppCompatActivity() {
         statusMessageView.text = status.message
         statusUrlView.text = status.activeUrl.ifBlank { getString(R.string.no_active_url) }
         quickStartSummaryView.text = quickStartSummary(status, validation.effectiveUrl)
-        readinessSummaryView.text = readinessSummaryText()
+        readinessSummaryView.text = readinessSummaryText(status)
         notificationReadinessView.text = notificationReadinessText()
-        hotspotReadinessView.text = hotspotReadinessText()
+        hotspotReadinessView.text = hotspotReadinessText(status)
         batteryReadinessView.text = batteryReadinessText()
         backgroundGuidanceView.text = backgroundGuidanceText()
         selectedRouteView.text = routeSummary
@@ -600,14 +600,22 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.quick_start_running_summary)
             status.error != null ->
                 getString(R.string.quick_start_error_summary)
+            status.diagnostics.hotspotActive == false ->
+                getString(R.string.quick_start_hotspot_disabled)
+            status.diagnostics.hotspotActive == null ->
+                getString(R.string.quick_start_hotspot_unknown)
             effectiveUrl.isNotBlank() ->
                 getString(R.string.quick_start_ready_to_start)
             else ->
                 getString(R.string.detected_address_missing)
         }
 
-    private fun readinessSummaryText(): String =
-        if (hasNotificationPermission() && isIgnoringBatteryOptimizations() && localCandidates.isNotEmpty()) {
+    private fun readinessSummaryText(status: ProxyStatus): String =
+        if (
+            hasNotificationPermission() &&
+            isIgnoringBatteryOptimizations() &&
+            status.diagnostics.hotspotActive == true
+        ) {
             getString(R.string.readiness_summary_ready)
         } else {
             getString(R.string.readiness_summary_action_needed)
@@ -620,11 +628,11 @@ class MainActivity : AppCompatActivity() {
             getString(R.string.readiness_notifications_blocked)
         }
 
-    private fun hotspotReadinessText(): String =
-        if (localCandidates.isNotEmpty()) {
-            getString(R.string.readiness_hotspot_ready)
-        } else {
-            getString(R.string.readiness_hotspot_missing)
+    private fun hotspotReadinessText(status: ProxyStatus): String =
+        when (status.diagnostics.hotspotActive) {
+            true -> getString(R.string.readiness_hotspot_ready)
+            false -> getString(R.string.readiness_hotspot_disabled)
+            null -> getString(R.string.readiness_hotspot_unknown)
         }
 
     private fun batteryReadinessText(): String =

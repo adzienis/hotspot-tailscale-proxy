@@ -108,9 +108,9 @@
         android:layout_height="wrap_content"
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
-        app:tabGravity="fill"
+        app:tabGravity="start"
         app:tabIndicatorFullWidth="false"
-        app:tabMode="fixed" />
+        app:tabMode="scrollable" />
 
     <FrameLayout
         android:layout_width="match_parent"

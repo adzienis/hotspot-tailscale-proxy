@@ -51,53 +51,54 @@ class ProxyService : Service() {
             return
         }
 
-        val config = parseConfig(intent)
-        val resolvedBaseUrl = resolveAdvertisedBaseUrl(config)
         val logFile = ProxyPreferences.logFile(this)
         logFile.writeText("")
-
-        val binary = File(applicationInfo.nativeLibraryDir, NATIVE_BINARY)
-        binary.setExecutable(true, true)
-        if (!binary.exists()) {
-            ProxyPreferences.setStatus(
-                context = this,
-                running = false,
-                activeUrl = resolvedBaseUrl,
-                lastExitCode = null,
-                message = "Missing bundled binary: ${binary.absolutePath}",
-            )
-            refreshNotification("Bundled proxy binary missing")
-            sendStatusBroadcast()
-            stopSelf()
-            return
-        }
-
-        val command = buildList {
-            add(binary.absolutePath)
-            add("serve")
-            add("--http-only")
-            add("--bind")
-            add("0.0.0.0")
-            add("--port")
-            add(config.port.toString())
-            add("--base-url")
-            add(resolvedBaseUrl)
-            if (config.debug) {
-                add("--debug")
-            }
-        }
-
-        startForeground(NOTIFICATION_ID, notification("Starting $resolvedBaseUrl"))
-        stopRequested = false
+        var resolvedBaseUrl = ""
 
         try {
+            val config = parseConfig(intent)
+            resolvedBaseUrl = resolveAdvertisedBaseUrl(config)
+            val binary = File(applicationInfo.nativeLibraryDir, NATIVE_BINARY)
+            binary.setExecutable(true, true)
+            if (!binary.exists()) {
+                ProxyPreferences.setStatus(
+                    context = this,
+                    running = false,
+                    activeUrl = resolvedBaseUrl,
+                    lastExitCode = null,
+                    message = "Missing bundled binary: ${binary.absolutePath}",
+                )
+                refreshNotification("Bundled proxy binary missing")
+                sendStatusBroadcast()
+                stopSelf()
+                return
+            }
+
+            val command = buildList {
+                add(binary.absolutePath)
+                add("serve")
+                add("--http-only")
+                add("--bind")
+                add("0.0.0.0")
+                add("--port")
+                add(config.port.toString())
+                add("--base-url")
+                add(resolvedBaseUrl)
+                if (config.debug) {
+                    add("--debug")
+                }
+            }
+
+            startForeground(NOTIFICATION_ID, notification("Starting $resolvedBaseUrl"))
+            stopRequested = false
+
             val startedProcess = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
                 .start()
 
             process = startedProcess
-            ProxyPreferences.saveConfig(this, config.copy(advertisedBaseUrl = config.advertisedBaseUrl))
+            ProxyPreferences.saveConfig(this, config)
             ProxyPreferences.setStatus(
                 context = this,
                 running = true,
@@ -165,22 +166,19 @@ class ProxyService : Service() {
         val fallback = ProxyPreferences.loadConfig(this)
         return ProxyConfig(
             port = intent?.getIntExtra(EXTRA_PORT, fallback.port) ?: fallback.port,
-            advertisedBaseUrl = intent?.getStringExtra(EXTRA_ADVERTISED_BASE_URL)
-                ?.trim()
-                ?.removeSuffix("/")
-                .orEmpty()
-                .ifBlank { fallback.advertisedBaseUrl.trim().removeSuffix("/") },
+            advertisedBaseUrl = intent?.getStringExtra(EXTRA_ADVERTISED_BASE_URL).orEmpty()
+                .ifBlank { fallback.advertisedBaseUrl },
+            selectedLocalAddress = intent?.getStringExtra(EXTRA_SELECTED_LOCAL_ADDRESS).orEmpty()
+                .ifBlank { fallback.selectedLocalAddress },
             debug = intent?.getBooleanExtra(EXTRA_DEBUG, fallback.debug) ?: fallback.debug,
         )
     }
 
     private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String {
-        if (config.advertisedBaseUrl.isNotBlank()) {
-            return config.advertisedBaseUrl.trim().removeSuffix("/")
+        if (config.port !in 1..65535) {
+            throw IllegalArgumentException("Listen port must be between 1 and 65535")
         }
-
-        val address = HotspotAddressDetector.detectPrivateIpv4() ?: DEFAULT_HOTSPOT_IP
-        return "http://$address:${config.port}"
+        return ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
     }
 
     private fun sendStatusBroadcast() {
@@ -231,11 +229,11 @@ class ProxyService : Service() {
 
         const val EXTRA_PORT = "extra_port"
         const val EXTRA_ADVERTISED_BASE_URL = "extra_advertised_base_url"
+        const val EXTRA_SELECTED_LOCAL_ADDRESS = "extra_selected_local_address"
         const val EXTRA_DEBUG = "extra_debug"
 
         private const val CHANNEL_ID = "proxy_status"
         private const val NOTIFICATION_ID = 4001
         private const val NATIVE_BINARY = "libproxyt.so"
-        private const val DEFAULT_HOTSPOT_IP = "192.168.43.1"
     }
 }

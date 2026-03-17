@@ -90,6 +90,10 @@ object ProxyPreferences {
         return if (contents.length <= maxChars) contents else contents.takeLast(maxChars)
     }
 
+    fun clearLogs(context: Context) {
+        logFile(context).writeText("")
+    }
+
     private fun preferences(context: Context) =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 }

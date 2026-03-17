@@ -74,6 +74,12 @@ class MainActivity : AppCompatActivity() {
             renderLogs()
         }
 
+        findViewById<MaterialButton>(R.id.clearLogsButton).setOnClickListener {
+            ProxyPreferences.clearLogs(this)
+            renderLogs()
+            Toast.makeText(this, "Logs cleared", Toast.LENGTH_SHORT).show()
+        }
+
         startButton.setOnClickListener {
             val configToStart = readConfigFromUi() ?: return@setOnClickListener
             ProxyPreferences.saveConfig(this, configToStart)

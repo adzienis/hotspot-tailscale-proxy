@@ -7,6 +7,7 @@
     <string name="debug_switch">Enable verbose proxy logs</string>
     <string name="use_detected_ip">Use detected IP</string>
     <string name="refresh_logs">Refresh logs</string>
+    <string name="clear_logs">Clear logs</string>
     <string name="start_proxy">Start proxy</string>
     <string name="stop_proxy">Stop proxy</string>
     <string name="usage_notes">Point the iPhone Tailscale client at the advertised URL shown above. For hotspot-only use, this should usually be an RFC1918 address like http://192.168.43.1:8080.</string>

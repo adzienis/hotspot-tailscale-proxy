@@ -1,8 +1,8 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.OutputDirectory
@@ -26,22 +26,22 @@ private data class GoAndroidAbiSpec(
             "x86" -> "i686-linux-android${minSdk}-clang"
             "x86_64" -> "x86_64-linux-android${minSdk}-clang"
             else -> error("Unsupported Android ABI: $androidAbi")
-        }
+    }
 }
 
+@CacheableTask
 abstract class BuildGoAndroidBinariesTask @Inject constructor(
     private val execOperations: ExecOperations,
 ) : DefaultTask() {
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val sourceDir: DirectoryProperty
+    abstract val sourceDir: org.gradle.api.file.DirectoryProperty
 
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.ABSOLUTE)
-    abstract val sdkDir: DirectoryProperty
+    @get:Input
+    abstract val sdkDirPath: Property<String>
 
     @get:OutputDirectory
-    abstract val outputDir: DirectoryProperty
+    abstract val outputDir: org.gradle.api.file.DirectoryProperty
 
     @get:Input
     abstract val abiMatrix: ListProperty<String>
@@ -67,7 +67,7 @@ abstract class BuildGoAndroidBinariesTask @Inject constructor(
         outputRoot.deleteRecursively()
         outputRoot.mkdirs()
 
-        val ndkDir = sdkDir.get().asFile
+        val ndkDir = File(sdkDirPath.get())
             .resolve("ndk")
             .resolve(ndkVersion.get())
         val prebuiltDir = ndkDir

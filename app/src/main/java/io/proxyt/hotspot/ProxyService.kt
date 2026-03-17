@@ -15,9 +15,11 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -31,8 +33,13 @@ data class ResolvedEndpoint(
 )
 
 object ProxyHealthCheck {
-    fun localProbeUrl(port: Int): String = "http://127.0.0.1:$port"
+    fun localProbeUrl(port: Int): String = "http://127.0.0.1:$port/health"
 }
+
+data class ProbeResult(
+    val healthy: Boolean,
+    val detail: String,
+)
 
 class ProxyService : Service() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -249,11 +256,13 @@ class ProxyService : Service() {
             ProxyPreferences.saveConfig(this, config)
 
             executor.execute {
-                val healthError = awaitHealthy(
+                val probeResult = awaitHealthy(
                     startedProcess = startedProcess,
+                    localProbePort = config.port,
                     localProbeUrl = localProbeUrl,
                     advertisedUrl = resolvedEndpoint.activeUrl,
                 )
+                val healthError = probeResult.error
                 if (stopRequested) {
                     val exitCode = startedProcess.waitFor()
                     val currentStatus = ProxyPreferences.readStatus(this)
@@ -296,7 +305,7 @@ class ProxyService : Service() {
                             diagnostics = diagnosticsSeed.copy(
                                 currentPid = processPid,
                                 portBindResult = "Process started but health check did not complete",
-                                lastProbeResult = "Local HTTP probe to $localProbeUrl failed",
+                                lastProbeResult = probeResult.detail,
                             ),
                         ),
                     )
@@ -321,7 +330,7 @@ class ProxyService : Service() {
                         diagnostics = diagnosticsSeed.copy(
                             currentPid = processPid,
                             portBindResult = "Bind confirmed on port ${config.port}",
-                            lastProbeResult = "Local HTTP probe to $localProbeUrl succeeded",
+                            lastProbeResult = probeResult.detail,
                         ),
                     ),
                 )
@@ -620,28 +629,40 @@ class ProxyService : Service() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
+    private data class HealthCheckResult(
+        val error: ProxyErrorInfo?,
+        val detail: String,
+    )
+
     private fun awaitHealthy(
         startedProcess: Process,
+        localProbePort: Int,
         localProbeUrl: String,
         advertisedUrl: String,
-    ): ProxyErrorInfo? {
+    ): HealthCheckResult {
+        var lastProbeDetail = "Local HTTP probe pending: $localProbeUrl"
         repeat(8) { attempt ->
             if (stopRequested) {
-                return null
+                return HealthCheckResult(error = null, detail = "Health check cancelled")
             }
             if (process !== startedProcess) {
-                return null
+                return HealthCheckResult(error = null, detail = "Health check superseded")
             }
             if (!startedProcess.isAlive) {
                 val exitCode = runCatching { startedProcess.exitValue() }.getOrNull()
-                return classifyProcessFailure(
-                    detail = "Proxy exited before passing the startup health check.",
-                    exitCode = exitCode,
-                    logTail = ProxyPreferences.readLogTail(this, 4_000),
+                return HealthCheckResult(
+                    error = classifyProcessFailure(
+                        detail = "Proxy exited before passing the startup health check.",
+                        exitCode = exitCode,
+                        logTail = ProxyPreferences.readLogTail(this, 4_000),
+                    ),
+                    detail = lastProbeDetail,
                 )
             }
-            if (probeUrl(localProbeUrl)) {
-                return null
+            val probeResult = probeLocalProxy(localProbePort, localProbeUrl)
+            lastProbeDetail = probeResult.detail
+            if (probeResult.healthy) {
+                return HealthCheckResult(error = null, detail = probeResult.detail)
             }
             if (attempt < 7) {
                 Thread.sleep(750)
@@ -655,17 +676,40 @@ class ProxyService : Service() {
             }
         }
 
-        return ProxyErrorInfo(
-            category = ProxyErrorCategory.STARTUP_FAILURE,
-            title = getString(R.string.health_check_failed_title),
-            detail = "${getString(R.string.health_check_failed_detail)} Local probe: $localProbeUrl. Advertised URL: $advertisedUrl",
-            recommendedAction = getString(R.string.health_check_failed_action),
+        return HealthCheckResult(
+            error = ProxyErrorInfo(
+                category = ProxyErrorCategory.STARTUP_FAILURE,
+                title = getString(R.string.health_check_failed_title),
+                detail = "${getString(R.string.health_check_failed_detail)} Local probe: $localProbeUrl. Advertised URL: $advertisedUrl. Last probe result: $lastProbeDetail",
+                recommendedAction = getString(R.string.health_check_failed_action),
+            ),
+            detail = lastProbeDetail,
         )
     }
 
-    private fun probeUrl(url: String): Boolean {
+    private fun probeLocalProxy(port: Int, url: String): ProbeResult {
+        val httpResult = probeUrl(url)
+        if (httpResult.healthy) {
+            return httpResult
+        }
+
+        val tcpResult = probeTcpPort(port)
+        if (tcpResult.healthy) {
+            return ProbeResult(
+                healthy = true,
+                detail = "Local TCP probe to 127.0.0.1:$port succeeded after HTTP probe failed: ${httpResult.detail}",
+            )
+        }
+
+        return ProbeResult(
+            healthy = false,
+            detail = "${httpResult.detail}; ${tcpResult.detail}",
+        )
+    }
+
+    private fun probeUrl(url: String): ProbeResult {
         if (url.isBlank()) {
-            return false
+            return ProbeResult(healthy = false, detail = "Local HTTP probe skipped: blank URL")
         }
 
         return runCatching {
@@ -678,11 +722,36 @@ class ProxyService : Service() {
             }
             try {
                 val code = connection.responseCode
-                code in 100..599
+                ProbeResult(
+                    healthy = code in 100..599,
+                    detail = "Local HTTP probe to $url returned $code",
+                )
             } finally {
                 connection.disconnect()
             }
-        }.getOrDefault(false)
+        }.getOrElse { error ->
+            ProbeResult(
+                healthy = false,
+                detail = "Local HTTP probe to $url failed: ${error.javaClass.simpleName}${error.message?.let { ": $it" }.orEmpty()}",
+            )
+        }
+    }
+
+    private fun probeTcpPort(port: Int): ProbeResult {
+        return runCatching {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress("127.0.0.1", port), 1_000)
+            }
+            ProbeResult(
+                healthy = true,
+                detail = "Local TCP probe to 127.0.0.1:$port succeeded",
+            )
+        }.getOrElse { error ->
+            ProbeResult(
+                healthy = false,
+                detail = "Local TCP probe to 127.0.0.1:$port failed: ${error.javaClass.simpleName}${error.message?.let { ": $it" }.orEmpty()}",
+            )
+        }
     }
 
     private fun copyActiveUrlToClipboard() {

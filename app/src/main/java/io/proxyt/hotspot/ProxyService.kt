@@ -317,7 +317,7 @@ class ProxyService : Service() {
                 )
                 ProxyPreferences.appendLog(
                     this,
-                    "Serving on ${resolvedEndpoint.activeUrl}${processPid?.let { \" (pid $it)\" }.orEmpty()}",
+                    "Serving on ${resolvedEndpoint.activeUrl}${processPid?.let { " (pid $it)" }.orEmpty()}",
                 )
                 refreshNotification("Serving ${resolvedEndpoint.activeUrl}")
                 sendStatusBroadcast()

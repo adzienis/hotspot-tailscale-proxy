@@ -2,6 +2,7 @@ package io.proxyt.hotspot
 
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
@@ -78,7 +79,9 @@ class MainActivityFlowsTest {
             onView(tabWithText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.baseUrlEdit)).perform(replaceText("http://192.168.43.1:8080"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(click())
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             onView(tabWithText(R.string.tab_quick_start)).perform(click())
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
             onView(withId(R.id.stateValueText)).check(matches(withText(R.string.state_running)))
             onView(withId(R.id.statusUrlText)).check(matches(withText("http://192.168.43.1:8080")))

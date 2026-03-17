@@ -100,7 +100,7 @@ jobs:
         run: printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
 
       - name: Run managed device instrumentation tests
-        run: ./gradlew -Pproxyt.abis=x86_64 :app:pixel6Api30AtdDebugAndroidTest
+        run: ./gradlew -Pproxyt.abis=x86 :app:pixel6Api30AtdDebugAndroidTest
 
       - name: Upload instrumentation reports
         if: failure()

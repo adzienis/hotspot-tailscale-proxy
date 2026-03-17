@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
   workflow_dispatch:
 
 permissions:
@@ -41,15 +46,45 @@ jobs:
         env:
           AUTOREBASE_TOKEN: ${{ secrets.PR_AUTOREBASE_TOKEN }}
           REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
           set -euo pipefail
           export GH_TOKEN="$AUTOREBASE_TOKEN"
           git remote set-url origin "https://x-access-token:$AUTOREBASE_TOKEN@github.com/$REPO.git"
 
-          gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" \
-            --jq '.[] | select(.head.repo != null and .head.repo.full_name == .base.repo.full_name) | [.number, .head.ref, .head.sha] | @tsv' \
-            | while IFS=$'\t' read -r pr_number branch_name head_sha; do
+          if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
+            if [[ "$PR_BASE_REF" != "main" ]]; then
+              echo "Skipping PR #$PR_NUMBER because base branch is $PR_BASE_REF"
+              exit 0
+            fi
+
+            if [[ -z "$PR_NUMBER" || "$PR_HEAD_REPO" != "$PR_BASE_REPO" ]]; then
+              echo "Skipping PR event because it is not a same-repo PR."
+              exit 0
+            fi
+
+            prs_to_check="$(printf '%s\t%s\t%s\n' "$PR_NUMBER" "$PR_HEAD_REF" "$PR_HEAD_SHA")"
+          else
+            prs_to_check="$(
+              gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" \
+                --jq '.[] | select(.head.repo != null and .head.repo.full_name == .base.repo.full_name) | [.number, .head.ref, .head.sha] | @tsv'
+            )"
+          fi
+
+          if [[ -z "$prs_to_check" ]]; then
+            echo "No eligible pull requests to rebase."
+            exit 0
+          fi
+
+          while IFS=$'\t' read -r pr_number branch_name head_sha; do
+                [[ -n "$pr_number" ]] || continue
                 echo "Checking PR #$pr_number branch $branch_name"
 
                 git fetch origin main "$branch_name"
@@ -72,4 +107,4 @@ jobs:
                   gh pr comment "$pr_number" --repo "$REPO" --body "Automatic rebase onto \`main\` failed due to conflicts. Rebase this branch locally and push again."
                   echo "Automatic rebase failed for PR #$pr_number"
                 fi
-              done
+          done <<< "$prs_to_check"

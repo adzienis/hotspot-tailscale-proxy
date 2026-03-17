@@ -122,6 +122,8 @@ object HotspotAddressDetector {
 
         val activeAddresses = activeLinks.mapTo(mutableSetOf()) { it.address }
         val filtered = candidates.filter { candidate ->
+            candidate.kind == "Hotspot" ||
+                candidate.kind == "USB tethering" ||
             ActiveLink(candidate.interfaceName, candidate.address) in activeLinks || candidate.address in activeAddresses
         }
         return if (filtered.isNotEmpty()) filtered else candidates

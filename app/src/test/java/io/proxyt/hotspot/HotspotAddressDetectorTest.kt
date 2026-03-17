@@ -44,7 +44,26 @@ class HotspotAddressDetectorTest {
             ),
         )
 
-        assertEquals(1, filtered.size)
-        assertEquals("192.168.1.20", filtered.single().address)
+        assertEquals(2, filtered.size)
+        assertEquals("192.168.43.1", filtered.first().address)
+        assertEquals("ap0", filtered.first().interfaceName)
+        assertEquals("192.168.1.20", filtered.last().address)
+    }
+
+    @Test
+    fun `preserves usb tethering candidates when connectivity only reports upstream links`() {
+        val filtered = HotspotAddressDetector.filterActiveCandidates(
+            candidates = listOf(
+                HotspotAddressCandidate(interfaceName = "rndis0", address = "192.168.42.129", score = 2, kind = "USB tethering"),
+                HotspotAddressCandidate(interfaceName = "wlan0", address = "192.168.1.20", score = 3, kind = "Wi-Fi"),
+            ),
+            activeLinks = setOf(
+                HotspotAddressDetector.ActiveLink(interfaceName = "wlan0", address = "192.168.1.20"),
+            ),
+        )
+
+        assertEquals(2, filtered.size)
+        assertEquals("192.168.42.129", filtered.first().address)
+        assertEquals("rndis0", filtered.first().interfaceName)
     }
 }

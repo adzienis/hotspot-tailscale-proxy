@@ -117,6 +117,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += supportedGoAbis.map { it.androidAbi }
@@ -170,6 +171,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+
+    testOptions {
+        animationsDisabled = true
+    }
 }
 
 tasks.matching { it.name.matches(Regex("merge.+JniLibFolders")) }.configureEach {
@@ -191,4 +196,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }

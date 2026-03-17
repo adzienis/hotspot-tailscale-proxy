@@ -278,43 +278,7 @@ func runProxy() {
 	}
 
 	// Create the main HTTP handler that will be used in all modes
-	mainHandler := http.NewServeMux()
-
-	// Add a health check endpoint
-	mainHandler.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		logger.Info("Health check request", zap.String("remote_addr", r.RemoteAddr))
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK - Tailscale Proxy is running"))
-	})
-
-	// Handle Tailscale control protocol upgrade specially
-	mainHandler.HandleFunc("/ts2021", handleTailscaleControlProtocol)
-
-	// Handle all other requests by proxying them
-	mainHandler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Don't proxy health checks
-		if r.URL.Path == "/health" {
-			logger.Info("Health check request", zap.String("remote_addr", r.RemoteAddr))
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK - Tailscale Proxy is running"))
-			return
-		}
-
-		// Handle Tailscale control protocol upgrade specially
-		if strings.HasPrefix(r.URL.Path, "/ts2021") {
-			handleTailscaleControlProtocol(w, r)
-			return
-		}
-
-		if debug {
-			logDebugRequest("MAIN_HANDLER", r)
-		}
-		logger.Info("Request - proxying",
-			zap.String("remote_addr", r.RemoteAddr),
-			zap.String("host", r.Host),
-			zap.String("path", r.URL.Path))
-		reverseProxy.ServeHTTP(w, r)
-	})
+	mainHandler := newMainHandler(reverseProxy)
 
 	var servers []*http.Server
 
@@ -441,6 +405,38 @@ func runProxy() {
 	}
 
 	logger.Info("Servers stopped")
+}
+
+func newMainHandler(proxyHandler http.Handler) http.Handler {
+	mainHandler := http.NewServeMux()
+	mainHandler.HandleFunc("/health", serveHealthCheck)
+	mainHandler.HandleFunc("/ts2021", handleTailscaleControlProtocol)
+	mainHandler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			serveHealthCheck(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/ts2021") {
+			handleTailscaleControlProtocol(w, r)
+			return
+		}
+
+		if debug {
+			logDebugRequest("MAIN_HANDLER", r)
+		}
+		logger.Info("Request - proxying",
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.String("host", r.Host),
+			zap.String("path", r.URL.Path))
+		proxyHandler.ServeHTTP(w, r)
+	})
+	return mainHandler
+}
+
+func serveHealthCheck(w http.ResponseWriter, r *http.Request) {
+	logger.Info("Health check request", zap.String("remote_addr", r.RemoteAddr))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("OK - Tailscale Proxy is running"))
 }
 
 // logDebugRequest logs detailed information about a request when debug mode is enabled

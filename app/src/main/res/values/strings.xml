@@ -9,6 +9,17 @@
     <string name="last_failure_label">Last failure</string>
     <string name="last_exit_code_label">Last exit code</string>
     <string name="next_action_label">Next recommended action</string>
+    <string name="diagnostics_panel_title">Runtime diagnostics</string>
+    <string name="current_pid_label">Current PID</string>
+    <string name="selected_interface_label">Selected interface</string>
+    <string name="selected_ip_label">Selected IP</string>
+    <string name="port_bind_result_label">Port bind result</string>
+    <string name="last_probe_result_label">Last probe result</string>
+    <string name="hotspot_active_label">Hotspot active</string>
+    <string name="startup_events_label">Last startup events</string>
+    <string name="diagnostics_not_available">Not available yet</string>
+    <string name="hotspot_active_yes">Yes</string>
+    <string name="hotspot_active_no">No</string>
     <string name="listen_port">Listen port</string>
     <string name="port_value">%1$d</string>
     <string name="advertised_url">Advertised base URL</string>
@@ -19,6 +30,9 @@
     <string name="refresh_local_ips">Refresh local IPs</string>
     <string name="refresh_logs">Refresh logs</string>
     <string name="clear_logs">Clear logs</string>
+    <string name="share_logs">Share logs</string>
+    <string name="share_logs_subject">Hotspot ProxyT logs</string>
+    <string name="no_logs_to_share">No logs to share yet.</string>
     <string name="copy_last_error">Copy last error</string>
     <string name="last_error_copied">Last error copied</string>
     <string name="copy_effective_url">Copy control URL</string>

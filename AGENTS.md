@@ -5,12 +5,14 @@ This repo packages a modified `proxyt` server into an Android app for local hots
 
 ## Default Workflow
 1. Start from `origin/main`, not local `main`.
-2. Create a dedicated git worktree and branch for each task.
-3. Make changes inside that worktree only.
-4. Verify locally before pushing.
-5. Push the branch and open or update a PR against `main`.
-6. If `origin/main` moves, fetch, rebase the branch onto `origin/main`, and force-push with lease.
-7. Do not merge `main` or `origin/main` into a task branch. Keep PR branches linear by rebasing only.
+2. Always `git fetch origin main` before starting a new task branch.
+3. Create the task branch from `origin/main` before creating the worktree.
+4. Create a dedicated git worktree for that branch.
+5. Make changes inside that worktree only.
+6. Verify locally before pushing.
+7. Push the branch and open or update a PR against `main`.
+8. If `origin/main` moves, fetch, rebase the branch onto `origin/main`, and force-push with lease.
+9. Do not merge `main` or `origin/main` into a task branch. Keep PR branches linear by rebasing only.
 
 ## Branch And Worktree Pattern
 - Prefer branch names like `codex/<topic>-<date>` or another short task-specific name.
@@ -23,7 +25,8 @@ This repo packages a modified `proxyt` server into an Android app for local hots
 Create a worktree:
 ```bash
 git fetch origin main
-git worktree add ../hotspot-tailscale-proxy-<topic> -b codex/<topic> origin/main
+git branch codex/<topic> origin/main
+git worktree add ../hotspot-tailscale-proxy-<topic> codex/<topic>
 ```
 
 Rebase an existing branch:

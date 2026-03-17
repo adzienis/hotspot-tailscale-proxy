@@ -45,7 +45,7 @@ class MainActivityFlowsTest {
     @Test
     fun invalidConfigShowsValidationErrorWithoutStartingService() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(R.string.tab_configure)).perform(click())
+            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.portEdit)).perform(replaceText("70000"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(scrollTo(), click())
 
@@ -74,10 +74,10 @@ class MainActivityFlowsTest {
         }
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(withText(R.string.tab_configure)).perform(click())
+            onView(withText(R.string.tab_advanced_diagnostics)).perform(click())
             onView(withId(R.id.baseUrlEdit)).perform(replaceText("http://192.168.43.1:8080"), closeSoftKeyboard())
             onView(withId(R.id.startButton)).perform(scrollTo(), click())
-            onView(withText(R.string.tab_overview)).perform(click())
+            onView(withText(R.string.tab_quick_start)).perform(click())
 
             onView(withId(R.id.stateValueText)).check(matches(withText(R.string.state_running)))
             onView(withId(R.id.statusUrlText)).check(matches(withText("http://192.168.43.1:8080")))

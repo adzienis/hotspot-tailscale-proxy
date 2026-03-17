@@ -1,3 +1,4 @@
+import com.android.build.api.dsl.ManagedVirtualDevice
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -117,7 +118,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "io.proxyt.hotspot.HotspotTestRunner"
 
         ndk {
             abiFilters += supportedGoAbis.map { it.androidAbi }
@@ -174,6 +175,21 @@ android {
 
     testOptions {
         animationsDisabled = true
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
+        managedDevices {
+            devices {
+                create<ManagedVirtualDevice>("pixel6Api30Atd") {
+                    device = "Pixel 6"
+                    apiLevel = 30
+                    systemImageSource = "aosp-atd"
+                }
+                create<ManagedVirtualDevice>("pixel8Api35") {
+                    device = "Pixel 8"
+                    apiLevel = 35
+                    systemImageSource = "aosp"
+                }
+            }
+        }
     }
 }
 
@@ -196,7 +212,12 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
 
     testImplementation("junit:junit:4.13.2")
+
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.espresso:espresso-intents:3.6.1")
+    androidTestUtil("androidx.test:orchestrator:1.5.1")
 }

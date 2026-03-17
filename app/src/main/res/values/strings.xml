@@ -2,6 +2,11 @@
 <resources>
     <string name="app_name">Hotspot ProxyT</string>
     <string name="subtitle">Run a local ProxyT instance on Android and advertise it over the phone’s private hotspot IP.</string>
+    <string name="quick_actions_title">Quick actions</string>
+    <string name="tab_overview">Overview</string>
+    <string name="tab_configure">Configure</string>
+    <string name="tab_diagnostics">Diagnostics</string>
+    <string name="tab_logs">Logs</string>
     <string name="status_panel_title">Proxy status</string>
     <string name="current_state_label">Current state</string>
     <string name="status_message_label">Details</string>

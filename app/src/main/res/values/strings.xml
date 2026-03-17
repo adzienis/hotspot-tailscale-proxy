@@ -36,4 +36,10 @@
     <string name="error_state_proxy_exit">Proxy exited</string>
     <string name="error_state_permission">Permission issue</string>
     <string name="error_state_startup_failure">Startup failure</string>
+    <string name="notification_permission_required_title">Notifications required</string>
+    <string name="notification_permission_required_short">Notification permission required before starting the proxy</string>
+    <string name="notification_permission_required_message">This app depends on foreground-service notifications. Grant notification permission on Android 13 or newer before starting the proxy.</string>
+    <string name="notification_permission_continue">Continue</string>
+    <string name="notification_permission_settings_message">Notification permission was denied. Open app settings, allow notifications, and then try starting the proxy again.</string>
+    <string name="open_settings">Open settings</string>
 </resources>

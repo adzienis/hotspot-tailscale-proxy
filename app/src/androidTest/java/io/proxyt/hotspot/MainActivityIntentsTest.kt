@@ -32,13 +32,10 @@ class MainActivityIntentsTest {
 
     @Test
     fun shareLogsFiresChooserSendIntent() {
-        val runtime = installFakeRuntimeDependencies()
-        runtime.statusStore.appendLog("Starting proxy")
-        runtime.statusStore.appendLog("Serving on http://192.168.43.1:8080")
+        installFakeRuntimeDependencies()
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            onView(tabWithText(R.string.tab_advanced_diagnostics)).perform(click())
-            onView(withId(R.id.shareLogsButton)).perform(scrollTo(), click())
+            onView(withId(R.id.shareDiagnosticsButton)).perform(click())
 
             intended(hasAction(Intent.ACTION_CHOOSER))
         }

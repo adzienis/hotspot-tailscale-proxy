@@ -38,13 +38,17 @@ import com.google.android.material.textfield.TextInputLayout
 
 class MainActivity : AppCompatActivity() {
     private lateinit var tabLayout: TabLayout
-    private lateinit var overviewTabContent: View
-    private lateinit var configureTabContent: View
-    private lateinit var diagnosticsTabContent: View
-    private lateinit var logsTabContent: View
+    private lateinit var quickStartTabContent: View
+    private lateinit var advancedDiagnosticsTabContent: View
     private lateinit var stateView: TextView
     private lateinit var statusMessageView: TextView
     private lateinit var statusUrlView: TextView
+    private lateinit var quickStartSummaryView: TextView
+    private lateinit var readinessSummaryView: TextView
+    private lateinit var notificationReadinessView: TextView
+    private lateinit var hotspotReadinessView: TextView
+    private lateinit var batteryReadinessView: TextView
+    private lateinit var backgroundGuidanceView: TextView
     private lateinit var errorCategoryView: TextView
     private lateinit var lastFailureView: TextView
     private lateinit var lastExitCodeView: TextView
@@ -57,7 +61,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var hotspotActiveView: TextView
     private lateinit var startupEventsView: TextView
     private lateinit var detectedAddressView: TextView
-    private lateinit var batteryOptimizationView: TextView
     private lateinit var logView: TextView
     private lateinit var portLayout: TextInputLayout
     private lateinit var portEdit: TextInputEditText
@@ -70,8 +73,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var stopButton: MaterialButton
     private lateinit var copyLastErrorButton: MaterialButton
     private lateinit var copyUrlButton: MaterialButton
+    private lateinit var shareDiagnosticsButton: MaterialButton
     private lateinit var shareLogsButton: MaterialButton
     private lateinit var batteryOptimizationButton: MaterialButton
+    private lateinit var openSettingsButton: MaterialButton
 
     private val connectivityManager: ConnectivityManager? by lazy {
         getSystemService(ConnectivityManager::class.java)
@@ -87,7 +92,7 @@ class MainActivity : AppCompatActivity() {
     private var suppressValidationCallbacks = false
     private var networkCallbackRegistered = false
     private var logObserver: FileObserver? = null
-    private var selectedTabIndex = MainTab.Overview.ordinal
+    private var selectedTabIndex = MainTab.QuickStart.ordinal
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -139,15 +144,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        selectedTabIndex = savedInstanceState?.getInt(KEY_SELECTED_TAB) ?: MainTab.Overview.ordinal
+        selectedTabIndex = savedInstanceState?.getInt(KEY_SELECTED_TAB) ?: MainTab.QuickStart.ordinal
         tabLayout = findViewById(R.id.mainTabLayout)
-        overviewTabContent = findViewById(R.id.overviewTabContent)
-        configureTabContent = findViewById(R.id.configureTabContent)
-        diagnosticsTabContent = findViewById(R.id.diagnosticsTabContent)
-        logsTabContent = findViewById(R.id.logsTabContent)
+        quickStartTabContent = findViewById(R.id.quickStartTabContent)
+        advancedDiagnosticsTabContent = findViewById(R.id.advancedDiagnosticsTabContent)
         stateView = findViewById(R.id.stateValueText)
         statusMessageView = findViewById(R.id.statusMessageText)
         statusUrlView = findViewById(R.id.statusUrlText)
+        quickStartSummaryView = findViewById(R.id.quickStartSummaryText)
+        readinessSummaryView = findViewById(R.id.readinessSummaryText)
+        notificationReadinessView = findViewById(R.id.notificationReadinessText)
+        hotspotReadinessView = findViewById(R.id.hotspotReadinessText)
+        batteryReadinessView = findViewById(R.id.batteryReadinessText)
+        backgroundGuidanceView = findViewById(R.id.backgroundGuidanceText)
         errorCategoryView = findViewById(R.id.errorCategoryText)
         lastFailureView = findViewById(R.id.lastFailureText)
         lastExitCodeView = findViewById(R.id.lastExitCodeText)
@@ -160,7 +169,6 @@ class MainActivity : AppCompatActivity() {
         hotspotActiveView = findViewById(R.id.hotspotActiveText)
         startupEventsView = findViewById(R.id.startupEventsText)
         detectedAddressView = findViewById(R.id.detectedAddressText)
-        batteryOptimizationView = findViewById(R.id.batteryOptimizationText)
         logView = findViewById(R.id.logText)
         portLayout = findViewById(R.id.portLayout)
         portEdit = findViewById(R.id.portEdit)
@@ -173,8 +181,10 @@ class MainActivity : AppCompatActivity() {
         stopButton = findViewById(R.id.stopButton)
         copyLastErrorButton = findViewById(R.id.copyLastErrorButton)
         copyUrlButton = findViewById(R.id.copyUrlButton)
+        shareDiagnosticsButton = findViewById(R.id.shareDiagnosticsButton)
         shareLogsButton = findViewById(R.id.shareLogsButton)
         batteryOptimizationButton = findViewById(R.id.batteryOptimizationButton)
+        openSettingsButton = findViewById(R.id.openSettingsButton)
 
         setupTabs()
 
@@ -228,8 +238,16 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.copied_control_url, Toast.LENGTH_SHORT).show()
         }
 
+        shareDiagnosticsButton.setOnClickListener {
+            shareDiagnostics()
+        }
+
         batteryOptimizationButton.setOnClickListener {
             requestBatteryOptimizationExemption()
+        }
+
+        openSettingsButton.setOnClickListener {
+            openAppSettings()
         }
 
         portEdit.doAfterTextChanged {
@@ -392,17 +410,15 @@ class MainActivity : AppCompatActivity() {
                 override fun onTabReselected(tab: TabLayout.Tab) = Unit
             },
         )
-        val initialIndex = selectedTabIndex.coerceIn(MainTab.Overview.ordinal, MainTab.Logs.ordinal)
+        val initialIndex = selectedTabIndex.coerceIn(MainTab.QuickStart.ordinal, MainTab.AdvancedDiagnostics.ordinal)
         tabLayout.getTabAt(initialIndex)?.select()
         selectTab(initialIndex)
     }
 
     private fun selectTab(index: Int) {
-        selectedTabIndex = index.coerceIn(MainTab.Overview.ordinal, MainTab.Logs.ordinal)
-        overviewTabContent.visibility = if (selectedTabIndex == MainTab.Overview.ordinal) View.VISIBLE else View.GONE
-        configureTabContent.visibility = if (selectedTabIndex == MainTab.Configure.ordinal) View.VISIBLE else View.GONE
-        diagnosticsTabContent.visibility = if (selectedTabIndex == MainTab.Diagnostics.ordinal) View.VISIBLE else View.GONE
-        logsTabContent.visibility = if (selectedTabIndex == MainTab.Logs.ordinal) View.VISIBLE else View.GONE
+        selectedTabIndex = index.coerceIn(MainTab.QuickStart.ordinal, MainTab.AdvancedDiagnostics.ordinal)
+        quickStartTabContent.visibility = if (selectedTabIndex == MainTab.QuickStart.ordinal) View.VISIBLE else View.GONE
+        advancedDiagnosticsTabContent.visibility = if (selectedTabIndex == MainTab.AdvancedDiagnostics.ordinal) View.VISIBLE else View.GONE
     }
 
     private fun refreshLocalAddressOptions() {
@@ -488,6 +504,12 @@ class MainActivity : AppCompatActivity() {
         stateView.text = stateLabel(status)
         statusMessageView.text = status.message
         statusUrlView.text = status.activeUrl.ifBlank { getString(R.string.no_active_url) }
+        quickStartSummaryView.text = quickStartSummary(status, validation.effectiveUrl)
+        readinessSummaryView.text = readinessSummaryText()
+        notificationReadinessView.text = notificationReadinessText()
+        hotspotReadinessView.text = hotspotReadinessText()
+        batteryReadinessView.text = batteryReadinessText()
+        backgroundGuidanceView.text = backgroundGuidanceText()
 
         val visibleError = status.error
         errorCategoryView.text = visibleError?.let(::errorLabel) ?: getString(R.string.error_state_healthy)
@@ -506,8 +528,7 @@ class MainActivity : AppCompatActivity() {
             null -> getString(R.string.diagnostics_not_available)
         }
         copyLastErrorButton.visibility = if (buildClipboardError(status) == null) View.GONE else View.VISIBLE
-
-        renderBatteryOptimizationGuidance()
+        batteryOptimizationButton.visibility = if (isIgnoringBatteryOptimizations()) View.GONE else View.VISIBLE
 
         startButton.isEnabled = status.state != ProxyRuntimeState.Starting && status.state != ProxyRuntimeState.Running
         stopButton.isEnabled = status.desiredRunning || status.isActive
@@ -516,16 +537,6 @@ class MainActivity : AppCompatActivity() {
     private fun renderLogs() {
         logView.text = ProxyPreferences.readLogTail(this)
         startupEventsView.text = ProxyPreferences.readStartupEventSummary(this)
-    }
-
-    private fun renderBatteryOptimizationGuidance() {
-        val ignoring = isIgnoringBatteryOptimizations()
-        batteryOptimizationView.text = if (ignoring) {
-            getString(R.string.battery_optimization_ignored)
-        } else {
-            getString(R.string.battery_optimization_active)
-        }
-        batteryOptimizationButton.visibility = if (ignoring) View.GONE else View.VISIBLE
     }
 
     private fun stateLabel(status: ProxyStatus): String =
@@ -566,6 +577,53 @@ class MainActivity : AppCompatActivity() {
             !isIgnoringBatteryOptimizations() -> getString(R.string.battery_optimization_active)
             status.state == ProxyRuntimeState.Running -> getString(R.string.next_action_running)
             else -> getString(R.string.next_action_idle)
+        }
+
+    private fun quickStartSummary(status: ProxyStatus, effectiveUrl: String): String =
+        when {
+            status.state == ProxyRuntimeState.Running && status.activeUrl.isNotBlank() ->
+                getString(R.string.quick_start_running_summary)
+            status.error != null ->
+                getString(R.string.quick_start_error_summary)
+            effectiveUrl.isNotBlank() ->
+                getString(R.string.quick_start_ready_to_start)
+            else ->
+                getString(R.string.detected_address_missing)
+        }
+
+    private fun readinessSummaryText(): String =
+        if (hasNotificationPermission() && isIgnoringBatteryOptimizations() && localCandidates.isNotEmpty()) {
+            getString(R.string.readiness_summary_ready)
+        } else {
+            getString(R.string.readiness_summary_action_needed)
+        }
+
+    private fun notificationReadinessText(): String =
+        if (hasNotificationPermission()) {
+            getString(R.string.readiness_notifications_ready)
+        } else {
+            getString(R.string.readiness_notifications_blocked)
+        }
+
+    private fun hotspotReadinessText(): String =
+        if (localCandidates.isNotEmpty()) {
+            getString(R.string.readiness_hotspot_ready)
+        } else {
+            getString(R.string.readiness_hotspot_missing)
+        }
+
+    private fun batteryReadinessText(): String =
+        if (isIgnoringBatteryOptimizations()) {
+            getString(R.string.readiness_battery_ready)
+        } else {
+            getString(R.string.readiness_battery_blocked)
+        }
+
+    private fun backgroundGuidanceText(): String =
+        when {
+            isIgnoringBatteryOptimizations() -> getString(R.string.battery_optimization_ignored)
+            Build.MANUFACTURER.equals("motorola", ignoreCase = true) -> getString(R.string.battery_background_motorola)
+            else -> getString(R.string.battery_background_generic)
         }
 
     private fun buildClipboardError(status: ProxyStatus?): String? {
@@ -640,6 +698,15 @@ class MainActivity : AppCompatActivity() {
         batteryOptimizationLauncher.launch(launchIntent)
     }
 
+    private fun openAppSettings() {
+        startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", packageName, null),
+            ),
+        )
+    }
+
     private fun startLogObserver() {
         if (logObserver != null) {
             return
@@ -682,11 +749,58 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun shareDiagnostics() {
+        val report = buildDiagnosticsReport()
+        val logFile = ProxyPreferences.logFile(this)
+        val chooserIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.share_diagnostics_subject))
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+
+        if (logFile.exists()) {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", logFile)
+            chooserIntent.putExtra(Intent.EXTRA_STREAM, uri)
+            chooserIntent.clipData = ClipData.newUri(contentResolver, getString(R.string.share_logs_subject), uri)
+            chooserIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        startActivity(Intent.createChooser(chooserIntent, getString(R.string.share_diagnostics)))
+        Toast.makeText(this, R.string.diagnostics_shared, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun buildDiagnosticsReport(): String {
+        val status = latestStatus ?: ProxyPreferences.reconcileStatus(this)
+        val validation = validateUi(showErrors = false)
+        return buildString {
+            appendLine(getString(R.string.app_name))
+            appendLine("State: ${stateLabel(status)}")
+            appendLine("Message: ${status.message}")
+            appendLine("Active URL: ${status.activeUrl.ifBlank { getString(R.string.no_active_url) }}")
+            appendLine("Effective URL: ${validation.effectiveUrl.ifBlank { getString(R.string.no_active_url) }}")
+            appendLine("Notifications allowed: ${if (hasNotificationPermission()) "yes" else "no"}")
+            appendLine("Battery optimization exempt: ${if (isIgnoringBatteryOptimizations()) "yes" else "no"}")
+            appendLine("Private hotspot/LAN IP detected: ${if (localCandidates.isNotEmpty()) "yes" else "no"}")
+            appendLine("Manufacturer: ${Build.MANUFACTURER}")
+            appendLine("Model: ${Build.MODEL}")
+            appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+            appendLine()
+            appendLine("Diagnostics")
+            appendLine("Selected interface: ${status.diagnostics.selectedInterface.ifBlank { "n/a" }}")
+            appendLine("Selected IP: ${status.diagnostics.selectedIp.ifBlank { "n/a" }}")
+            appendLine("Current PID: ${status.diagnostics.currentPid?.toString() ?: "n/a"}")
+            appendLine("Port bind result: ${status.diagnostics.portBindResult.ifBlank { "n/a" }}")
+            appendLine("Last probe result: ${status.diagnostics.lastProbeResult.ifBlank { "n/a" }}")
+            appendLine("Hotspot active: ${status.diagnostics.hotspotActive?.toString() ?: "n/a"}")
+            appendLine("Last exit code: ${status.lastExitCode?.toString() ?: "n/a"}")
+            appendLine("Last failure: ${status.error?.detail ?: status.lastFailureReason.ifBlank { "n/a" }}")
+            appendLine("Recommended action: ${status.error?.recommendedAction ?: defaultRecommendedAction(status)}")
+        }
+    }
+
     private enum class MainTab(val titleRes: Int) {
-        Overview(R.string.tab_overview),
-        Configure(R.string.tab_configure),
-        Diagnostics(R.string.tab_diagnostics),
-        Logs(R.string.tab_logs),
+        QuickStart(R.string.tab_quick_start),
+        AdvancedDiagnostics(R.string.tab_advanced_diagnostics),
     }
 
     companion object {

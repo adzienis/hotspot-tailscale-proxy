@@ -50,8 +50,8 @@ jobs:
       - name: Write local.properties
         run: printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
 
-      - name: Lint and assemble debug
-        run: ./gradlew -Pproxyt.abis=arm64-v8a :app:lintDebug :app:assembleDebug
+      - name: Run Android PR verification
+        run: ./gradlew -Pproxyt.abis=arm64-v8a verifyAndroidPr
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

@@ -36,13 +36,17 @@ class ProxyServiceTestingTest {
             activeUrl = "http://192.168.43.1:8080",
             diagnostics = diagnostics,
             startTimestampMs = 5678L,
+            probeStatus = "Pending",
+            probeTarget = "http://127.0.0.1:8080/health",
             probeDetail = "Local HTTP probe pending: http://127.0.0.1:8080/health",
         )
 
         assertEquals(ProxyRuntimeState.Starting, status.state)
         assertEquals("http://192.168.43.1:8080", status.activeUrl)
         assertEquals(1234L, status.lastSuccessfulStartTimestampMs)
-        assertEquals("Local HTTP probe pending: http://127.0.0.1:8080/health", status.diagnostics.lastProbeResult)
+        assertEquals("Pending", status.diagnostics.lastProbeStatus)
+        assertEquals("http://127.0.0.1:8080/health", status.diagnostics.lastProbeTarget)
+        assertEquals("Local HTTP probe pending: http://127.0.0.1:8080/health", status.diagnostics.lastProbeDetail)
     }
 
     @Test
@@ -58,6 +62,8 @@ class ProxyServiceTestingTest {
             startTimestampMs = 999L,
             processPid = 42L,
             diagnostics = diagnostics,
+            probeStatus = "Healthy",
+            probeTarget = "http://127.0.0.1:8080/health",
             probeDetail = "Local HTTP probe to http://127.0.0.1:8080/health returned 200",
             port = 8080,
         )
@@ -65,7 +71,9 @@ class ProxyServiceTestingTest {
         assertEquals(ProxyRuntimeState.Running, status.state)
         assertEquals(42L, status.diagnostics.currentPid)
         assertEquals("Bind confirmed on port 8080", status.diagnostics.portBindResult)
-        assertEquals("Local HTTP probe to http://127.0.0.1:8080/health returned 200", status.diagnostics.lastProbeResult)
+        assertEquals("Healthy", status.diagnostics.lastProbeStatus)
+        assertEquals("http://127.0.0.1:8080/health", status.diagnostics.lastProbeTarget)
+        assertEquals("Local HTTP probe to http://127.0.0.1:8080/health returned 200", status.diagnostics.lastProbeDetail)
         assertEquals(999L, status.lastSuccessfulStartTimestampMs)
     }
 
@@ -88,6 +96,8 @@ class ProxyServiceTestingTest {
             error = error,
             startTimestampMs = 333L,
             lastExitCode = null,
+            probeStatus = "Failed",
+            probeTarget = "http://127.0.0.1:8080/health",
             probeDetail = "Local HTTP probe to http://127.0.0.1:8080/health failed: ConnectException",
         )
 
@@ -95,6 +105,9 @@ class ProxyServiceTestingTest {
         assertEquals(222L, status.lastSuccessfulStartTimestampMs)
         assertEquals(84L, status.diagnostics.currentPid)
         assertEquals("Process started but health check did not complete", status.diagnostics.portBindResult)
+        assertEquals("Failed", status.diagnostics.lastProbeStatus)
+        assertEquals("http://127.0.0.1:8080/health", status.diagnostics.lastProbeTarget)
+        assertEquals("Local HTTP probe to http://127.0.0.1:8080/health failed: ConnectException", status.diagnostics.lastProbeDetail)
     }
 
     @Test
@@ -105,7 +118,12 @@ class ProxyServiceTestingTest {
             activeUrl = "http://192.168.43.1:8080",
             startTimestampMs = 555L,
             lastSuccessfulStartTimestampMs = 444L,
-            diagnostics = ProxyDiagnostics(currentPid = 99L, lastProbeResult = "ok"),
+            diagnostics = ProxyDiagnostics(
+                currentPid = 99L,
+                lastProbeStatus = "Healthy",
+                lastProbeTarget = "http://127.0.0.1:8080/health",
+                lastProbeDetail = "ok",
+            ),
         )
 
         val status = ProxyServiceStatusFactory.idleAfterStop(

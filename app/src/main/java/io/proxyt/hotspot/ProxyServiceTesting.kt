@@ -69,6 +69,8 @@ object ProxyServiceStatusFactory {
         activeUrl: String,
         diagnostics: ProxyDiagnostics,
         startTimestampMs: Long,
+        probeStatus: String,
+        probeTarget: String,
         probeDetail: String,
     ): ProxyStatus =
         ProxyStatus(
@@ -80,7 +82,11 @@ object ProxyServiceStatusFactory {
             startTimestampMs = startTimestampMs,
             lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
             error = null,
-            diagnostics = diagnostics.copy(lastProbeResult = probeDetail),
+            diagnostics = diagnostics.copy(
+                lastProbeStatus = probeStatus,
+                lastProbeTarget = probeTarget,
+                lastProbeDetail = probeDetail,
+            ),
         )
 
     fun running(
@@ -88,6 +94,8 @@ object ProxyServiceStatusFactory {
         startTimestampMs: Long,
         processPid: Long?,
         diagnostics: ProxyDiagnostics,
+        probeStatus: String,
+        probeTarget: String,
         probeDetail: String,
         port: Int,
     ): ProxyStatus =
@@ -103,7 +111,9 @@ object ProxyServiceStatusFactory {
             diagnostics = diagnostics.copy(
                 currentPid = processPid,
                 portBindResult = "Bind confirmed on port $port",
-                lastProbeResult = probeDetail,
+                lastProbeStatus = probeStatus,
+                lastProbeTarget = probeTarget,
+                lastProbeDetail = probeDetail,
             ),
         )
 
@@ -115,6 +125,8 @@ object ProxyServiceStatusFactory {
         error: ProxyErrorInfo,
         startTimestampMs: Long,
         lastExitCode: Int?,
+        probeStatus: String,
+        probeTarget: String,
         probeDetail: String,
     ): ProxyStatus =
         ProxyStatus(
@@ -130,7 +142,9 @@ object ProxyServiceStatusFactory {
             diagnostics = diagnostics.copy(
                 currentPid = processPid,
                 portBindResult = "Process started but health check did not complete",
-                lastProbeResult = probeDetail,
+                lastProbeStatus = probeStatus,
+                lastProbeTarget = probeTarget,
+                lastProbeDetail = probeDetail,
             ),
         )
 

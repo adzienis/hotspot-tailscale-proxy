@@ -54,8 +54,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var currentPidView: TextView
     private lateinit var selectedInterfaceView: TextView
     private lateinit var selectedIpView: TextView
+    private lateinit var selectedRouteView: TextView
     private lateinit var portBindResultView: TextView
     private lateinit var lastProbeResultView: TextView
+    private lateinit var probeTargetView: TextView
+    private lateinit var probeDetailView: TextView
     private lateinit var hotspotActiveView: TextView
     private lateinit var startupEventsView: TextView
     private lateinit var detectedAddressView: TextView
@@ -159,8 +162,11 @@ class MainActivity : AppCompatActivity() {
         currentPidView = findViewById(R.id.currentPidText)
         selectedInterfaceView = findViewById(R.id.selectedInterfaceText)
         selectedIpView = findViewById(R.id.selectedIpText)
+        selectedRouteView = findViewById(R.id.selectedRouteText)
         portBindResultView = findViewById(R.id.portBindResultText)
         lastProbeResultView = findViewById(R.id.lastProbeResultText)
+        probeTargetView = findViewById(R.id.probeTargetText)
+        probeDetailView = findViewById(R.id.probeDetailText)
         hotspotActiveView = findViewById(R.id.hotspotActiveText)
         startupEventsView = findViewById(R.id.startupEventsText)
         detectedAddressView = findViewById(R.id.detectedAddressText)
@@ -481,6 +487,7 @@ class MainActivity : AppCompatActivity() {
 
         val status = ProxyPreferences.reconcileStatus(this)
         latestStatus = status
+        val routeSummary = buildSelectedRouteSummary(validation.effectiveUrl, status.diagnostics)
 
         stateView.text = stateLabel(status)
         statusMessageView.text = status.message
@@ -491,6 +498,7 @@ class MainActivity : AppCompatActivity() {
         hotspotReadinessView.text = hotspotReadinessText()
         batteryReadinessView.text = batteryReadinessText()
         backgroundGuidanceView.text = backgroundGuidanceText()
+        selectedRouteView.text = routeSummary
 
         val visibleError = status.error
         errorCategoryView.text = visibleError?.let(::errorLabel) ?: getString(R.string.error_state_healthy)
@@ -499,10 +507,12 @@ class MainActivity : AppCompatActivity() {
         lastExitCodeView.text = status.lastExitCode?.toString() ?: getString(R.string.no_exit_code)
         nextActionView.text = visibleError?.recommendedAction ?: defaultRecommendedAction(status)
         currentPidView.text = status.diagnostics.currentPid?.toString() ?: getString(R.string.diagnostics_not_available)
-        selectedInterfaceView.text = status.diagnostics.selectedInterface.ifBlank { getString(R.string.diagnostics_not_available) }
+        selectedInterfaceView.text = buildSelectedInterfaceLabel(status.diagnostics)
         selectedIpView.text = status.diagnostics.selectedIp.ifBlank { getString(R.string.diagnostics_not_available) }
         portBindResultView.text = status.diagnostics.portBindResult.ifBlank { getString(R.string.diagnostics_not_available) }
-        lastProbeResultView.text = status.diagnostics.lastProbeResult.ifBlank { getString(R.string.diagnostics_not_available) }
+        lastProbeResultView.text = status.diagnostics.lastProbeStatus.ifBlank { getString(R.string.diagnostics_not_available) }
+        probeTargetView.text = status.diagnostics.lastProbeTarget.ifBlank { getString(R.string.diagnostics_not_available) }
+        probeDetailView.text = status.diagnostics.lastProbeDetail.ifBlank { getString(R.string.diagnostics_not_available) }
         hotspotActiveView.text = when (status.diagnostics.hotspotActive) {
             true -> getString(R.string.hotspot_active_yes)
             false -> getString(R.string.hotspot_active_no)
@@ -528,6 +538,30 @@ class MainActivity : AppCompatActivity() {
             ProxyRuntimeState.Stopping -> "Stopping"
             ProxyRuntimeState.Failed -> "Failed"
         }
+
+    private fun buildSelectedRouteSummary(effectiveUrl: String, diagnostics: ProxyDiagnostics): String {
+        if (diagnostics.selectedIp.isBlank() && diagnostics.selectedInterface.isBlank()) {
+            return getString(R.string.selected_route_manual, effectiveUrl)
+        }
+        return getString(
+            R.string.selected_route_value,
+            diagnostics.selectedInterface.ifBlank { getString(R.string.diagnostics_not_available) },
+            diagnostics.selectedInterfaceKind.ifBlank { getString(R.string.diagnostics_not_available) },
+            diagnostics.selectedIp.ifBlank { getString(R.string.diagnostics_not_available) },
+            effectiveUrl,
+        )
+    }
+
+    private fun buildSelectedInterfaceLabel(diagnostics: ProxyDiagnostics): String {
+        if (diagnostics.selectedInterface.isBlank()) {
+            return getString(R.string.diagnostics_not_available)
+        }
+        return if (diagnostics.selectedInterfaceKind.isBlank()) {
+            diagnostics.selectedInterface
+        } else {
+            "${diagnostics.selectedInterface} (${diagnostics.selectedInterfaceKind})"
+        }
+    }
 
     private fun errorLabel(error: ProxyErrorInfo): String =
         when (error.category) {
@@ -710,8 +744,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareLogs() {
-        val logFile = ProxyPreferences.logFile(this)
-        if (!logFile.exists()) {
+        val logFile = ProxyPreferences.prepareShareLogFile(this)
+        if (logFile == null || !logFile.exists()) {
             Toast.makeText(this, R.string.no_logs_to_share, Toast.LENGTH_SHORT).show()
             return
         }
@@ -771,7 +805,9 @@ class MainActivity : AppCompatActivity() {
             appendLine("Selected IP: ${status.diagnostics.selectedIp.ifBlank { "n/a" }}")
             appendLine("Current PID: ${status.diagnostics.currentPid?.toString() ?: "n/a"}")
             appendLine("Port bind result: ${status.diagnostics.portBindResult.ifBlank { "n/a" }}")
-            appendLine("Last probe result: ${status.diagnostics.lastProbeResult.ifBlank { "n/a" }}")
+            appendLine("Last probe status: ${status.diagnostics.lastProbeStatus.ifBlank { "n/a" }}")
+            appendLine("Last probe target: ${status.diagnostics.lastProbeTarget.ifBlank { "n/a" }}")
+            appendLine("Last probe detail: ${status.diagnostics.lastProbeDetail.ifBlank { "n/a" }}")
             appendLine("Hotspot active: ${status.diagnostics.hotspotActive?.toString() ?: "n/a"}")
             appendLine("Last exit code: ${status.lastExitCode?.toString() ?: "n/a"}")
             appendLine("Last failure: ${status.error?.detail ?: status.lastFailureReason.ifBlank { "n/a" }}")

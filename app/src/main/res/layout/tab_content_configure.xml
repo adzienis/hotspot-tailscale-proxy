@@ -10,9 +10,19 @@
     android:paddingBottom="20dp">
 
     <TextView
+        android:id="@+id/selectedRouteText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/panel_background"
+        android:padding="16dp"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"
+        android:textColor="@color/proxy_ink" />
+
+    <TextView
         android:id="@+id/detectedAddressText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
         android:background="@drawable/panel_background"
         android:padding="16dp"
         android:textAppearance="@style/TextAppearance.MaterialComponents.Body2"

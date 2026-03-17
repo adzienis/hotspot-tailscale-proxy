@@ -43,9 +43,12 @@ data class ProxyErrorInfo(
 data class ProxyDiagnostics(
     val currentPid: Long? = null,
     val selectedInterface: String = "",
+    val selectedInterfaceKind: String = "",
     val selectedIp: String = "",
     val portBindResult: String = "",
-    val lastProbeResult: String = "",
+    val lastProbeStatus: String = "",
+    val lastProbeTarget: String = "",
+    val lastProbeDetail: String = "",
     val hotspotActive: Boolean? = null,
 )
 
@@ -88,12 +91,16 @@ object ProxyPreferences {
     private const val KEY_ERROR_ACTION = "error_action"
     private const val KEY_CURRENT_PID = "current_pid"
     private const val KEY_SELECTED_INTERFACE = "selected_interface"
+    private const val KEY_SELECTED_INTERFACE_KIND = "selected_interface_kind"
     private const val KEY_SELECTED_IP = "selected_ip"
     private const val KEY_PORT_BIND_RESULT = "port_bind_result"
-    private const val KEY_LAST_PROBE_RESULT = "last_probe_result"
+    private const val KEY_LAST_PROBE_STATUS = "last_probe_status"
+    private const val KEY_LAST_PROBE_TARGET = "last_probe_target"
+    private const val KEY_LAST_PROBE_DETAIL = "last_probe_detail"
     private const val KEY_HOTSPOT_ACTIVE = "hotspot_active"
     private const val LOG_MAX_BYTES = 256_000L
-    private const val LOG_KEEP_BYTES = 192_000
+    private const val LOG_SHARE_MAX_CHARS = 48_000
+    private const val LOG_ARCHIVE_LIMIT = 4
     private const val STARTUP_EVENT_DEFAULT = "No recent startup events."
     private val LEGACY_KEYS = setOf(KEY_RUNNING)
     private val STATUS_KEYS = setOf(
@@ -111,9 +118,12 @@ object ProxyPreferences {
         KEY_ERROR_ACTION,
         KEY_CURRENT_PID,
         KEY_SELECTED_INTERFACE,
+        KEY_SELECTED_INTERFACE_KIND,
         KEY_SELECTED_IP,
         KEY_PORT_BIND_RESULT,
-        KEY_LAST_PROBE_RESULT,
+        KEY_LAST_PROBE_STATUS,
+        KEY_LAST_PROBE_TARGET,
+        KEY_LAST_PROBE_DETAIL,
         KEY_HOTSPOT_ACTIVE,
     )
 
@@ -210,9 +220,12 @@ object ProxyPreferences {
             editor.putLong(KEY_CURRENT_PID, status.diagnostics.currentPid)
         }
         editor.putString(KEY_SELECTED_INTERFACE, status.diagnostics.selectedInterface)
+        editor.putString(KEY_SELECTED_INTERFACE_KIND, status.diagnostics.selectedInterfaceKind)
         editor.putString(KEY_SELECTED_IP, status.diagnostics.selectedIp)
         editor.putString(KEY_PORT_BIND_RESULT, status.diagnostics.portBindResult)
-        editor.putString(KEY_LAST_PROBE_RESULT, status.diagnostics.lastProbeResult)
+        editor.putString(KEY_LAST_PROBE_STATUS, status.diagnostics.lastProbeStatus)
+        editor.putString(KEY_LAST_PROBE_TARGET, status.diagnostics.lastProbeTarget)
+        editor.putString(KEY_LAST_PROBE_DETAIL, status.diagnostics.lastProbeDetail)
         if (status.diagnostics.hotspotActive == null) {
             editor.remove(KEY_HOTSPOT_ACTIVE)
         } else {
@@ -254,23 +267,31 @@ object ProxyPreferences {
 
     fun logFile(context: Context): File = File(context.filesDir, "proxyt.log")
 
+    fun startNewLogSession(context: Context) {
+        val currentLog = logFile(context)
+        if (currentLog.exists() && currentLog.length() > 0L) {
+            archiveLog(context, currentLog)
+        }
+        currentLog.parentFile?.mkdirs()
+        currentLog.writeText("")
+    }
+
     fun readLogTail(context: Context, maxChars: Int = 12_000): String {
-        val logFile = logFile(context)
-        if (!logFile.exists()) {
+        val transcript = recentLogTranscript(context, maxFiles = LOG_ARCHIVE_LIMIT + 1)
+        if (transcript.isBlank()) {
             return "No logs yet."
         }
-
-        val contents = logFile.readText()
-        return if (contents.length <= maxChars) contents else contents.takeLast(maxChars)
+        return if (transcript.length <= maxChars) transcript else transcript.takeLast(maxChars)
     }
 
     fun clearLogs(context: Context) {
-        logFile(context).writeText("")
+        logFile(context).delete()
+        logArchiveDirectory(context).deleteRecursively()
     }
 
     fun readStartupEventSummary(context: Context, maxEvents: Int = 5): String {
-        val logText = readLogTail(context, maxChars = 24_000)
-        if (logText == "No logs yet.") {
+        val logText = recentLogTranscript(context, maxFiles = LOG_ARCHIVE_LIMIT + 1)
+        if (logText.isBlank()) {
             return STARTUP_EVENT_DEFAULT
         }
 
@@ -303,18 +324,29 @@ object ProxyPreferences {
 
     fun appendLog(context: Context, message: String) {
         val logFile = logFile(context)
-        rotateLogsIfNeeded(logFile)
+        rotateLogsIfNeeded(context, logFile)
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
         logFile.appendText("[$timestamp] $message\n")
     }
 
-    private fun rotateLogsIfNeeded(logFile: File) {
+    fun prepareShareLogFile(context: Context): File? {
+        val transcript = recentLogTranscript(context, maxFiles = LOG_ARCHIVE_LIMIT + 1)
+        if (transcript.isBlank()) {
+            return null
+        }
+        val shareFile = File(context.filesDir, "proxyt-share.txt")
+        shareFile.writeText(
+            if (transcript.length <= LOG_SHARE_MAX_CHARS) transcript else transcript.takeLast(LOG_SHARE_MAX_CHARS),
+        )
+        return shareFile
+    }
+
+    private fun rotateLogsIfNeeded(context: Context, logFile: File) {
         if (!logFile.exists() || logFile.length() <= LOG_MAX_BYTES) {
             return
         }
-        val contents = logFile.readText()
-        val trimmed = if (contents.length <= LOG_KEEP_BYTES) contents else contents.takeLast(LOG_KEEP_BYTES)
-        logFile.writeText(trimmed)
+        archiveLog(context, logFile)
+        logFile.writeText("")
     }
 
     private fun readError(preferences: SharedPreferences): ProxyErrorInfo? {
@@ -348,9 +380,12 @@ object ProxyPreferences {
                 null
             },
             selectedInterface = preferences.getString(KEY_SELECTED_INTERFACE, "").orEmpty(),
+            selectedInterfaceKind = preferences.getString(KEY_SELECTED_INTERFACE_KIND, "").orEmpty(),
             selectedIp = preferences.getString(KEY_SELECTED_IP, "").orEmpty(),
             portBindResult = preferences.getString(KEY_PORT_BIND_RESULT, "").orEmpty(),
-            lastProbeResult = preferences.getString(KEY_LAST_PROBE_RESULT, "").orEmpty(),
+            lastProbeStatus = preferences.getString(KEY_LAST_PROBE_STATUS, "").orEmpty(),
+            lastProbeTarget = preferences.getString(KEY_LAST_PROBE_TARGET, "").orEmpty(),
+            lastProbeDetail = preferences.getString(KEY_LAST_PROBE_DETAIL, "").orEmpty(),
             hotspotActive = if (preferences.contains(KEY_HOTSPOT_ACTIVE)) {
                 preferences.getBoolean(KEY_HOTSPOT_ACTIVE, false)
             } else {
@@ -392,6 +427,67 @@ object ProxyPreferences {
         editor.apply()
     }
 
+    private fun recentLogTranscript(context: Context, maxFiles: Int): String {
+        val files = recentLogFiles(context, maxFiles)
+        if (files.isEmpty()) {
+            return ""
+        }
+
+        return buildString {
+            files.forEachIndexed { index, file ->
+                val label = if (file.name == LOG_FILE_NAME) {
+                    "Current log"
+                } else {
+                    "Archived log: ${file.nameWithoutExtension}"
+                }
+                append("== ")
+                append(label)
+                append(" ==\n")
+                append(file.readText())
+                if (index != files.lastIndex) {
+                    append("\n")
+                }
+            }
+        }
+    }
+
+    private fun recentLogFiles(context: Context, maxFiles: Int): List<File> {
+        val archived = logArchiveDirectory(context)
+            .listFiles()
+            ?.filter { it.isFile && it.extension == "log" }
+            ?.sortedByDescending { it.name }
+            .orEmpty()
+            .take(maxFiles - 1)
+            .reversed()
+
+        val current = logFile(context).takeIf(File::exists)
+        return buildList {
+            addAll(archived)
+            if (current != null) {
+                add(current)
+            }
+        }
+    }
+
+    private fun archiveLog(context: Context, currentLog: File) {
+        val archiveDir = logArchiveDirectory(context).apply { mkdirs() }
+        val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val archiveFile = File(archiveDir, "proxyt-$timestamp.log")
+        currentLog.copyTo(archiveFile, overwrite = true)
+        currentLog.delete()
+        pruneArchivedLogs(archiveDir)
+    }
+
+    private fun pruneArchivedLogs(archiveDir: File) {
+        archiveDir.listFiles()
+            ?.filter { it.isFile && it.extension == "log" }
+            ?.sortedByDescending { it.name }
+            ?.drop(LOG_ARCHIVE_LIMIT)
+            ?.forEach(File::delete)
+    }
+
+    private fun logArchiveDirectory(context: Context): File = File(context.filesDir, "proxyt-log-archive")
+
     private fun isProxyServiceRunning(context: Context): Boolean {
         val manager = context.getSystemService(ActivityManager::class.java) ?: return false
         @Suppress("DEPRECATION")
@@ -401,4 +497,6 @@ object ProxyPreferences {
 
     private fun preferences(context: Context) =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+
+    private const val LOG_FILE_NAME = "proxyt.log"
 }

@@ -31,7 +31,7 @@ data class ResolvedEndpoint(
 )
 
 object ProxyHealthCheck {
-    fun localProbeUrl(port: Int): String = "http://127.0.0.1:$port"
+    fun localProbeUrl(port: Int): String = "http://127.0.0.1:$port/health"
 }
 
 class ProxyService : Service() {

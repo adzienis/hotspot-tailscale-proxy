@@ -31,11 +31,17 @@ import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 
 class MainActivity : AppCompatActivity() {
+    private lateinit var tabLayout: TabLayout
+    private lateinit var overviewTabContent: View
+    private lateinit var configureTabContent: View
+    private lateinit var diagnosticsTabContent: View
+    private lateinit var logsTabContent: View
     private lateinit var stateView: TextView
     private lateinit var statusMessageView: TextView
     private lateinit var statusUrlView: TextView
@@ -81,6 +87,7 @@ class MainActivity : AppCompatActivity() {
     private var suppressValidationCallbacks = false
     private var networkCallbackRegistered = false
     private var logObserver: FileObserver? = null
+    private var selectedTabIndex = MainTab.Overview.ordinal
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -132,6 +139,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        selectedTabIndex = savedInstanceState?.getInt(KEY_SELECTED_TAB) ?: MainTab.Overview.ordinal
+        tabLayout = findViewById(R.id.mainTabLayout)
+        overviewTabContent = findViewById(R.id.overviewTabContent)
+        configureTabContent = findViewById(R.id.configureTabContent)
+        diagnosticsTabContent = findViewById(R.id.diagnosticsTabContent)
+        logsTabContent = findViewById(R.id.logsTabContent)
         stateView = findViewById(R.id.stateValueText)
         statusMessageView = findViewById(R.id.statusMessageText)
         statusUrlView = findViewById(R.id.statusUrlText)
@@ -162,6 +175,8 @@ class MainActivity : AppCompatActivity() {
         copyUrlButton = findViewById(R.id.copyUrlButton)
         shareLogsButton = findViewById(R.id.shareLogsButton)
         batteryOptimizationButton = findViewById(R.id.batteryOptimizationButton)
+
+        setupTabs()
 
         ProxyPreferences.reconcileStatus(this)
         statusPreferenceListener = ProxyPreferences.registerStatusListener(this) {
@@ -253,6 +268,11 @@ class MainActivity : AppCompatActivity() {
 
         renderStatus()
         renderLogs()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt(KEY_SELECTED_TAB, selectedTabIndex)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onStart() {
@@ -353,6 +373,36 @@ class MainActivity : AppCompatActivity() {
             return true
         }
         return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun setupTabs() {
+        if (tabLayout.tabCount == 0) {
+            MainTab.entries.forEach { tab ->
+                tabLayout.addTab(tabLayout.newTab().setText(tab.titleRes))
+            }
+        }
+        tabLayout.addOnTabSelectedListener(
+            object : TabLayout.OnTabSelectedListener {
+                override fun onTabSelected(tab: TabLayout.Tab) {
+                    selectTab(tab.position)
+                }
+
+                override fun onTabUnselected(tab: TabLayout.Tab) = Unit
+
+                override fun onTabReselected(tab: TabLayout.Tab) = Unit
+            },
+        )
+        val initialIndex = selectedTabIndex.coerceIn(MainTab.Overview.ordinal, MainTab.Logs.ordinal)
+        tabLayout.getTabAt(initialIndex)?.select()
+        selectTab(initialIndex)
+    }
+
+    private fun selectTab(index: Int) {
+        selectedTabIndex = index.coerceIn(MainTab.Overview.ordinal, MainTab.Logs.ordinal)
+        overviewTabContent.visibility = if (selectedTabIndex == MainTab.Overview.ordinal) View.VISIBLE else View.GONE
+        configureTabContent.visibility = if (selectedTabIndex == MainTab.Configure.ordinal) View.VISIBLE else View.GONE
+        diagnosticsTabContent.visibility = if (selectedTabIndex == MainTab.Diagnostics.ordinal) View.VISIBLE else View.GONE
+        logsTabContent.visibility = if (selectedTabIndex == MainTab.Logs.ordinal) View.VISIBLE else View.GONE
     }
 
     private fun refreshLocalAddressOptions() {
@@ -630,5 +680,16 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.share_logs),
             ),
         )
+    }
+
+    private enum class MainTab(val titleRes: Int) {
+        Overview(R.string.tab_overview),
+        Configure(R.string.tab_configure),
+        Diagnostics(R.string.tab_diagnostics),
+        Logs(R.string.tab_logs),
+    }
+
+    companion object {
+        private const val KEY_SELECTED_TAB = "selected_tab"
     }
 }

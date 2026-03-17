@@ -23,6 +23,23 @@ enum class ProxyRuntimeState {
     Failed,
 }
 
+enum class ProxyErrorCategory {
+    NONE,
+    MISSING_BINARY,
+    INVALID_CONFIG,
+    PORT_IN_USE,
+    PROXY_EXIT,
+    PERMISSION_REQUIRED,
+    STARTUP_FAILURE,
+}
+
+data class ProxyErrorInfo(
+    val category: ProxyErrorCategory,
+    val title: String,
+    val detail: String,
+    val recommendedAction: String,
+)
+
 data class ProxyStatus(
     val desiredRunning: Boolean = false,
     val state: ProxyRuntimeState = ProxyRuntimeState.Idle,
@@ -32,6 +49,7 @@ data class ProxyStatus(
     val lastFailureReason: String = "",
     val startTimestampMs: Long? = null,
     val lastSuccessfulStartTimestampMs: Long? = null,
+    val error: ProxyErrorInfo? = null,
 ) {
     val isActive: Boolean
         get() = state == ProxyRuntimeState.Starting || state == ProxyRuntimeState.Running || state == ProxyRuntimeState.Stopping
@@ -51,6 +69,10 @@ object ProxyPreferences {
     private const val KEY_LAST_FAILURE_REASON = "last_failure_reason"
     private const val KEY_START_TIMESTAMP = "start_timestamp"
     private const val KEY_LAST_SUCCESSFUL_START_TIMESTAMP = "last_successful_start_timestamp"
+    private const val KEY_ERROR_CATEGORY = "error_category"
+    private const val KEY_ERROR_TITLE = "error_title"
+    private const val KEY_ERROR_DETAIL = "error_detail"
+    private const val KEY_ERROR_ACTION = "error_action"
     private const val LOG_MAX_BYTES = 256_000L
     private const val LOG_KEEP_BYTES = 192_000
     private val STATUS_KEYS = setOf(
@@ -62,6 +84,10 @@ object ProxyPreferences {
         KEY_LAST_FAILURE_REASON,
         KEY_START_TIMESTAMP,
         KEY_LAST_SUCCESSFUL_START_TIMESTAMP,
+        KEY_ERROR_CATEGORY,
+        KEY_ERROR_TITLE,
+        KEY_ERROR_DETAIL,
+        KEY_ERROR_ACTION,
     )
 
     fun loadConfig(context: Context): ProxyConfig {
@@ -108,6 +134,7 @@ object ProxyPreferences {
             } else {
                 null
             },
+            error = readError(preferences),
         )
     }
 
@@ -137,6 +164,18 @@ object ProxyPreferences {
             editor.putLong(KEY_LAST_SUCCESSFUL_START_TIMESTAMP, status.lastSuccessfulStartTimestampMs)
         }
 
+        if (status.error == null || status.error.category == ProxyErrorCategory.NONE) {
+            editor.remove(KEY_ERROR_CATEGORY)
+            editor.remove(KEY_ERROR_TITLE)
+            editor.remove(KEY_ERROR_DETAIL)
+            editor.remove(KEY_ERROR_ACTION)
+        } else {
+            editor.putString(KEY_ERROR_CATEGORY, status.error.category.name)
+            editor.putString(KEY_ERROR_TITLE, status.error.title)
+            editor.putString(KEY_ERROR_DETAIL, status.error.detail)
+            editor.putString(KEY_ERROR_ACTION, status.error.recommendedAction)
+        }
+
         editor.apply()
     }
 
@@ -147,15 +186,23 @@ object ProxyPreferences {
         }
 
         val reconciled = if (status.desiredRunning) {
+            val detail = status.lastFailureReason.ifBlank { "Android is no longer running the proxy service." }
             status.copy(
                 state = ProxyRuntimeState.Failed,
                 message = "Proxy stopped unexpectedly",
-                lastFailureReason = status.lastFailureReason.ifBlank { "Android is no longer running the proxy service." },
+                lastFailureReason = detail,
+                error = status.error ?: ProxyErrorInfo(
+                    category = ProxyErrorCategory.STARTUP_FAILURE,
+                    title = "Proxy stopped unexpectedly",
+                    detail = detail,
+                    recommendedAction = "Try starting the proxy again. If it keeps stopping, copy the last error and inspect the logs.",
+                ),
             )
         } else {
             status.copy(
                 state = ProxyRuntimeState.Idle,
                 message = "Proxy idle",
+                error = null,
             )
         }
         setStatus(context, reconciled)
@@ -212,6 +259,29 @@ object ProxyPreferences {
         val contents = logFile.readText()
         val trimmed = if (contents.length <= LOG_KEEP_BYTES) contents else contents.takeLast(LOG_KEEP_BYTES)
         logFile.writeText(trimmed)
+    }
+
+    private fun readError(preferences: SharedPreferences): ProxyErrorInfo? {
+        val categoryName = preferences.getString(KEY_ERROR_CATEGORY, null) ?: return null
+        val category = ProxyErrorCategory.entries.firstOrNull { it.name == categoryName }
+            ?: ProxyErrorCategory.STARTUP_FAILURE
+        if (category == ProxyErrorCategory.NONE) {
+            return null
+        }
+
+        val title = preferences.getString(KEY_ERROR_TITLE, "").orEmpty()
+        val detail = preferences.getString(KEY_ERROR_DETAIL, "").orEmpty()
+        val recommendedAction = preferences.getString(KEY_ERROR_ACTION, "").orEmpty()
+        if (title.isBlank() && detail.isBlank() && recommendedAction.isBlank()) {
+            return null
+        }
+
+        return ProxyErrorInfo(
+            category = category,
+            title = title,
+            detail = detail,
+            recommendedAction = recommendedAction,
+        )
     }
 
     private fun isProxyServiceRunning(context: Context): Boolean {

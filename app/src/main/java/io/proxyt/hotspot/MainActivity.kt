@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.TextView
 import android.widget.Toast
@@ -25,12 +26,15 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var statusView: TextView
+    private lateinit var stateView: TextView
+    private lateinit var statusMessageView: TextView
+    private lateinit var statusUrlView: TextView
+    private lateinit var errorCategoryView: TextView
+    private lateinit var lastFailureView: TextView
+    private lateinit var lastExitCodeView: TextView
+    private lateinit var nextActionView: TextView
     private lateinit var detectedAddressView: TextView
     private lateinit var logView: TextView
     private lateinit var portLayout: TextInputLayout
@@ -42,20 +46,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var debugSwitch: MaterialCheckBox
     private lateinit var startButton: MaterialButton
     private lateinit var stopButton: MaterialButton
+    private lateinit var copyLastErrorButton: MaterialButton
     private lateinit var copyUrlButton: MaterialButton
 
-    private var localCandidates: List<HotspotAddressCandidate> = emptyList()
-    private var suppressValidationCallbacks = false
+    private var latestStatus: ProxyStatus? = null
     private var pendingStartConfig: ProxyConfig? = null
     private lateinit var statusPreferenceListener: SharedPreferences.OnSharedPreferenceChangeListener
+    private var localCandidates: List<HotspotAddressCandidate> = emptyList()
+    private var suppressValidationCallbacks = false
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         val configToStart = pendingStartConfig
+        pendingStartConfig = null
         if (granted && configToStart != null) {
             startProxyService(configToStart)
-            pendingStartConfig = null
             return@registerForActivityResult
         }
 
@@ -77,7 +83,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusView = findViewById(R.id.statusText)
+        stateView = findViewById(R.id.stateValueText)
+        statusMessageView = findViewById(R.id.statusMessageText)
+        statusUrlView = findViewById(R.id.statusUrlText)
+        errorCategoryView = findViewById(R.id.errorCategoryText)
+        lastFailureView = findViewById(R.id.lastFailureText)
+        lastExitCodeView = findViewById(R.id.lastExitCodeText)
+        nextActionView = findViewById(R.id.nextActionText)
         detectedAddressView = findViewById(R.id.detectedAddressText)
         logView = findViewById(R.id.logText)
         portLayout = findViewById(R.id.portLayout)
@@ -89,6 +101,7 @@ class MainActivity : AppCompatActivity() {
         debugSwitch = findViewById(R.id.debugSwitch)
         startButton = findViewById(R.id.startButton)
         stopButton = findViewById(R.id.stopButton)
+        copyLastErrorButton = findViewById(R.id.copyLastErrorButton)
         copyUrlButton = findViewById(R.id.copyUrlButton)
 
         ProxyPreferences.reconcileStatus(this)
@@ -122,8 +135,18 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Logs cleared", Toast.LENGTH_SHORT).show()
         }
 
+        copyLastErrorButton.setOnClickListener {
+            val clipboardText = buildClipboardError(latestStatus) ?: return@setOnClickListener
+            val clipboard = getSystemService(ClipboardManager::class.java)
+            clipboard.setPrimaryClip(ClipData.newPlainText("Proxy last error", clipboardText))
+            Toast.makeText(this, R.string.last_error_copied, Toast.LENGTH_SHORT).show()
+        }
+
         copyUrlButton.setOnClickListener {
             val effectiveUrl = validateUi(showErrors = false).effectiveUrl
+            if (effectiveUrl.isBlank()) {
+                return@setOnClickListener
+            }
             val clipboard = getSystemService(ClipboardManager::class.java)
             clipboard.setPrimaryClip(ClipData.newPlainText("Proxy control URL", effectiveUrl))
             Toast.makeText(this, "Copied control URL", Toast.LENGTH_SHORT).show()
@@ -198,6 +221,7 @@ class MainActivity : AppCompatActivity() {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
             .setNegativeButton(android.R.string.cancel) { _, _ ->
+                pendingStartConfig = null
                 persistNotificationPermissionFailure(config)
             }
             .show()
@@ -218,6 +242,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun persistNotificationPermissionFailure(config: ProxyConfig) {
         val resolvedBaseUrl = resolveAdvertisedBaseUrl(config)
+        val error = ProxyErrorInfo(
+            category = ProxyErrorCategory.PERMISSION_REQUIRED,
+            title = getString(R.string.error_state_permission),
+            detail = getString(R.string.notification_permission_required_message),
+            recommendedAction = getString(R.string.notification_permission_settings_message),
+        )
         ProxyPreferences.setStatus(
             this,
             ProxyStatus(
@@ -226,7 +256,8 @@ class MainActivity : AppCompatActivity() {
                 activeUrl = resolvedBaseUrl,
                 lastExitCode = null,
                 message = getString(R.string.notification_permission_required_short),
-                lastFailureReason = getString(R.string.notification_permission_required_message),
+                lastFailureReason = error.detail,
+                error = error,
             ),
         )
         renderStatus()
@@ -315,7 +346,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String =
-        ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
+        ProxyConfigValidator.resolveEffectiveUrl(config, localCandidates)
 
     private fun renderStatus() {
         val validation = validateUi(showErrors = false)
@@ -335,39 +366,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         val status = ProxyPreferences.reconcileStatus(this)
-        statusView.text = buildString {
-            append("State: ")
-            append(status.state.name.lowercase().replaceFirstChar { it.titlecase(Locale.US) })
-            append("\nDesired: ")
-            append(if (status.desiredRunning) "Running" else "Stopped")
-            if (status.activeUrl.isNotBlank()) {
-                append("\nActive URL: ")
-                append(status.activeUrl)
-            }
-            if (status.message.isNotBlank()) {
-                append("\nStatus: ")
-                append(status.message)
-            }
-            if (status.lastFailureReason.isNotBlank()) {
-                append("\nLast failure: ")
-                append(status.lastFailureReason)
-            }
-            if (status.lastExitCode != null) {
-                append("\nLast exit code: ")
-                append(status.lastExitCode)
-            }
-            if (status.startTimestampMs != null) {
-                append("\nStarted: ")
-                append(formatTimestamp(status.startTimestampMs))
-            }
-            if (status.lastSuccessfulStartTimestampMs != null) {
-                append("\nLast successful start: ")
-                append(formatTimestamp(status.lastSuccessfulStartTimestampMs))
-            }
-            if (!hasNotificationPermission()) {
-                append("\nNotifications required before the proxy can start on Android 13+.")
-            }
-        }
+        latestStatus = status
+
+        stateView.text = stateLabel(status)
+        statusMessageView.text = status.message
+        statusUrlView.text = status.activeUrl.ifBlank { getString(R.string.no_active_url) }
+
+        val visibleError = status.error
+        errorCategoryView.text = visibleError?.let(::errorLabel) ?: getString(R.string.error_state_healthy)
+        errorCategoryView.setTextColor(ContextCompat.getColor(this, errorColor(visibleError?.category)))
+        lastFailureView.text = visibleError?.detail ?: status.lastFailureReason.ifBlank { getString(R.string.no_failure_recorded) }
+        lastExitCodeView.text = status.lastExitCode?.toString() ?: getString(R.string.no_exit_code)
+        nextActionView.text = visibleError?.recommendedAction ?: defaultRecommendedAction(status)
+        copyLastErrorButton.visibility = if (buildClipboardError(status) == null) View.GONE else View.VISIBLE
 
         startButton.isEnabled = status.state != ProxyRuntimeState.Starting && status.state != ProxyRuntimeState.Running
         stopButton.isEnabled = status.desiredRunning || status.isActive
@@ -377,6 +388,69 @@ class MainActivity : AppCompatActivity() {
         logView.text = ProxyPreferences.readLogTail(this)
     }
 
-    private fun formatTimestamp(timestampMs: Long): String =
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(timestampMs))
+    private fun stateLabel(status: ProxyStatus): String =
+        when (status.state) {
+            ProxyRuntimeState.Idle -> getString(R.string.state_stopped)
+            ProxyRuntimeState.Starting -> "Starting"
+            ProxyRuntimeState.Running -> getString(R.string.state_running)
+            ProxyRuntimeState.Stopping -> "Stopping"
+            ProxyRuntimeState.Failed -> "Failed"
+        }
+
+    private fun errorLabel(error: ProxyErrorInfo): String =
+        when (error.category) {
+            ProxyErrorCategory.MISSING_BINARY -> getString(R.string.error_state_missing_binary)
+            ProxyErrorCategory.INVALID_CONFIG -> getString(R.string.error_state_invalid_config)
+            ProxyErrorCategory.PORT_IN_USE -> getString(R.string.error_state_port_in_use)
+            ProxyErrorCategory.PROXY_EXIT -> getString(R.string.error_state_proxy_exit)
+            ProxyErrorCategory.PERMISSION_REQUIRED -> getString(R.string.error_state_permission)
+            ProxyErrorCategory.STARTUP_FAILURE -> getString(R.string.error_state_startup_failure)
+            ProxyErrorCategory.NONE -> getString(R.string.error_state_healthy)
+        }
+
+    private fun errorColor(category: ProxyErrorCategory?): Int =
+        when (category) {
+            null, ProxyErrorCategory.NONE -> R.color.proxy_success
+            ProxyErrorCategory.INVALID_CONFIG -> R.color.proxy_warning
+            ProxyErrorCategory.PERMISSION_REQUIRED -> R.color.proxy_warning
+            ProxyErrorCategory.PORT_IN_USE -> R.color.proxy_error
+            ProxyErrorCategory.MISSING_BINARY -> R.color.proxy_error
+            ProxyErrorCategory.PROXY_EXIT -> R.color.proxy_error
+            ProxyErrorCategory.STARTUP_FAILURE -> R.color.proxy_error
+        }
+
+    private fun defaultRecommendedAction(status: ProxyStatus): String =
+        when {
+            status.error != null -> status.error.recommendedAction
+            !hasNotificationPermission() -> getString(R.string.notification_permission_required_message)
+            status.state == ProxyRuntimeState.Running -> getString(R.string.next_action_running)
+            else -> getString(R.string.next_action_idle)
+        }
+
+    private fun buildClipboardError(status: ProxyStatus?): String? {
+        if (status == null) {
+            return null
+        }
+
+        val error = status.error
+        val detail = error?.detail ?: status.lastFailureReason
+        if (detail.isBlank()) {
+            return null
+        }
+
+        return buildString {
+            append(error?.title ?: status.message)
+            append('\n')
+            append(detail)
+            if (status.lastExitCode != null) {
+                append("\nExit code: ")
+                append(status.lastExitCode)
+            }
+            val action = error?.recommendedAction
+            if (!action.isNullOrBlank()) {
+                append("\nRecommended action: ")
+                append(action)
+            }
+        }
+    }
 }

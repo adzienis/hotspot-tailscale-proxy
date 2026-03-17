@@ -58,6 +58,8 @@ class ProxyService : Service() {
                     desiredRunning = true,
                     state = ProxyRuntimeState.Running,
                     message = "Proxy already running",
+                    lastFailureReason = "",
+                    error = null,
                 ),
             )
             refreshNotification("Proxy already running")
@@ -66,89 +68,117 @@ class ProxyService : Service() {
         }
 
         val previousStatus = ProxyPreferences.readStatus(this)
-        val logFile = ProxyPreferences.logFile(this)
-        val startTimestamp = System.currentTimeMillis()
-        var resolvedBaseUrl = ""
+        val config = parseConfig(intent)
+        val resolvedBaseUrl = runCatching { resolveAdvertisedBaseUrl(config) }.getOrDefault("")
 
-        try {
-            val config = parseConfig(intent)
-            resolvedBaseUrl = resolveAdvertisedBaseUrl(config)
-
-            if (!hasNotificationPermission()) {
-                val failure = getString(R.string.notification_permission_required_message)
-                ProxyPreferences.setStatus(
-                    this,
-                    ProxyStatus(
-                        desiredRunning = true,
-                        state = ProxyRuntimeState.Failed,
-                        activeUrl = resolvedBaseUrl,
-                        lastExitCode = null,
-                        message = getString(R.string.notification_permission_required_short),
-                        lastFailureReason = failure,
-                        lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
-                    ),
-                )
-                ProxyPreferences.appendLog(this, "Start blocked: $failure")
-                sendStatusBroadcast()
-                stopSelf()
-                return
-            }
-
-            val binary = File(applicationInfo.nativeLibraryDir, NATIVE_BINARY)
-            binary.setExecutable(true, true)
-            if (!binary.exists()) {
-                val failure = "Missing bundled binary: ${binary.absolutePath}"
-                ProxyPreferences.setStatus(
-                    this,
-                    ProxyStatus(
-                        desiredRunning = true,
-                        state = ProxyRuntimeState.Failed,
-                        activeUrl = resolvedBaseUrl,
-                        lastExitCode = null,
-                        message = "Bundled proxy binary missing",
-                        lastFailureReason = failure,
-                        lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
-                    ),
-                )
-                ProxyPreferences.appendLog(this, failure)
-                refreshNotification("Bundled proxy binary missing")
-                sendStatusBroadcast()
-                stopSelf()
-                return
-            }
-
-            val command = buildList {
-                add(binary.absolutePath)
-                add("serve")
-                add("--http-only")
-                add("--bind")
-                add("0.0.0.0")
-                add("--port")
-                add(config.port.toString())
-                add("--base-url")
-                add(resolvedBaseUrl)
-                if (config.debug) {
-                    add("--debug")
-                }
-            }
-
-            stopRequested = false
-            ProxyPreferences.appendLog(this, "Starting proxy for $resolvedBaseUrl")
+        if (!hasNotificationPermission()) {
+            val error = notificationPermissionError()
             ProxyPreferences.setStatus(
                 this,
                 ProxyStatus(
                     desiredRunning = true,
-                    state = ProxyRuntimeState.Starting,
+                    state = ProxyRuntimeState.Failed,
                     activeUrl = resolvedBaseUrl,
                     lastExitCode = null,
-                    message = "Starting proxy",
-                    startTimestampMs = startTimestamp,
+                    message = getString(R.string.notification_permission_required_short),
+                    lastFailureReason = error.detail,
                     lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                    error = error,
                 ),
             )
+            ProxyPreferences.appendLog(this, "Start blocked: ${error.detail}")
             sendStatusBroadcast()
-            startForeground(NOTIFICATION_ID, notification("Starting $resolvedBaseUrl"))
+            stopSelf()
+            return
+        }
 
+        val configError = validateConfig(config)
+        if (configError != null) {
+            ProxyPreferences.setStatus(
+                this,
+                ProxyStatus(
+                    desiredRunning = true,
+                    state = ProxyRuntimeState.Failed,
+                    activeUrl = resolvedBaseUrl,
+                    lastExitCode = null,
+                    message = configError.title,
+                    lastFailureReason = configError.detail,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                    error = configError,
+                ),
+            )
+            ProxyPreferences.appendLog(this, configError.detail)
+            refreshNotification(configError.title)
+            sendStatusBroadcast()
+            stopSelf()
+            return
+        }
+
+        val logFile = ProxyPreferences.logFile(this)
+        val binary = File(applicationInfo.nativeLibraryDir, NATIVE_BINARY)
+        binary.setExecutable(true, true)
+        if (!binary.exists()) {
+            val error = ProxyErrorInfo(
+                category = ProxyErrorCategory.MISSING_BINARY,
+                title = "Bundled binary missing",
+                detail = "The app could not find ${binary.absolutePath}.",
+                recommendedAction = "Reinstall the app or rebuild it with the bundled native library included.",
+            )
+            ProxyPreferences.setStatus(
+                this,
+                ProxyStatus(
+                    desiredRunning = true,
+                    state = ProxyRuntimeState.Failed,
+                    activeUrl = resolvedBaseUrl,
+                    lastExitCode = null,
+                    message = error.title,
+                    lastFailureReason = error.detail,
+                    lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                    error = error,
+                ),
+            )
+            ProxyPreferences.appendLog(this, error.detail)
+            refreshNotification(error.title)
+            sendStatusBroadcast()
+            stopSelf()
+            return
+        }
+
+        val command = buildList {
+            add(binary.absolutePath)
+            add("serve")
+            add("--http-only")
+            add("--bind")
+            add("0.0.0.0")
+            add("--port")
+            add(config.port.toString())
+            add("--base-url")
+            add(resolveAdvertisedBaseUrl(config))
+            if (config.debug) {
+                add("--debug")
+            }
+        }
+
+        val startTimestamp = System.currentTimeMillis()
+        stopRequested = false
+        ProxyPreferences.appendLog(this, "Starting proxy for ${resolveAdvertisedBaseUrl(config)}")
+        ProxyPreferences.setStatus(
+            this,
+            ProxyStatus(
+                desiredRunning = true,
+                state = ProxyRuntimeState.Starting,
+                activeUrl = resolveAdvertisedBaseUrl(config),
+                lastExitCode = null,
+                message = "Starting proxy",
+                startTimestampMs = startTimestamp,
+                lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                error = null,
+            ),
+        )
+        sendStatusBroadcast()
+        startForeground(NOTIFICATION_ID, notification("Starting ${resolveAdvertisedBaseUrl(config)}"))
+
+        try {
             val startedProcess = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
@@ -161,14 +191,15 @@ class ProxyService : Service() {
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Running,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolveAdvertisedBaseUrl(config),
                     lastExitCode = null,
-                    message = "Serving on $resolvedBaseUrl",
+                    message = "Serving on ${resolveAdvertisedBaseUrl(config)}",
                     startTimestampMs = startTimestamp,
                     lastSuccessfulStartTimestampMs = startTimestamp,
+                    error = null,
                 ),
             )
-            refreshNotification("Serving $resolvedBaseUrl")
+            refreshNotification("Serving ${resolveAdvertisedBaseUrl(config)}")
             sendStatusBroadcast()
 
             executor.execute {
@@ -182,22 +213,29 @@ class ProxyService : Service() {
                     ProxyStatus(
                         desiredRunning = false,
                         state = ProxyRuntimeState.Idle,
-                        activeUrl = resolvedBaseUrl,
+                        activeUrl = currentStatus.activeUrl,
                         lastExitCode = exitCode,
                         message = "Proxy stopped",
                         startTimestampMs = currentStatus.startTimestampMs,
                         lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                        error = null,
                     )
                 } else {
+                    val error = classifyProcessFailure(
+                        detail = "Proxy exited with code $exitCode.",
+                        exitCode = exitCode,
+                        logTail = ProxyPreferences.readLogTail(this, 4_000),
+                    )
                     ProxyStatus(
                         desiredRunning = true,
                         state = ProxyRuntimeState.Failed,
-                        activeUrl = resolvedBaseUrl,
+                        activeUrl = currentStatus.activeUrl,
                         lastExitCode = exitCode,
-                        message = "Proxy exited unexpectedly",
-                        lastFailureReason = "Proxy exited with code $exitCode",
+                        message = error.title,
+                        lastFailureReason = error.detail,
                         startTimestampMs = currentStatus.startTimestampMs,
                         lastSuccessfulStartTimestampMs = currentStatus.lastSuccessfulStartTimestampMs,
+                        error = error,
                     )
                 }
                 ProxyPreferences.setStatus(this, nextStatus)
@@ -208,21 +246,25 @@ class ProxyService : Service() {
             }
         } catch (exception: Exception) {
             process = null
-            val failure = exception.message ?: "unknown error"
+            val error = classifyProcessFailure(
+                detail = exception.message ?: "Unknown startup error.",
+                logTail = ProxyPreferences.readLogTail(this, 4_000),
+            )
             ProxyPreferences.setStatus(
                 this,
                 ProxyStatus(
                     desiredRunning = true,
                     state = ProxyRuntimeState.Failed,
-                    activeUrl = resolvedBaseUrl,
+                    activeUrl = resolveAdvertisedBaseUrl(config),
                     lastExitCode = null,
-                    message = "Failed to start proxy",
-                    lastFailureReason = failure,
+                    message = error.title,
+                    lastFailureReason = error.detail,
                     startTimestampMs = startTimestamp,
                     lastSuccessfulStartTimestampMs = previousStatus.lastSuccessfulStartTimestampMs,
+                    error = error,
                 ),
             )
-            ProxyPreferences.appendLog(this, "Failed to start proxy: $failure")
+            ProxyPreferences.appendLog(this, "Failed to start proxy: ${error.detail}")
             refreshNotification("Failed to start proxy")
             sendStatusBroadcast()
             stopSelf()
@@ -238,6 +280,8 @@ class ProxyService : Service() {
                     desiredRunning = false,
                     state = ProxyRuntimeState.Idle,
                     message = "Proxy stopped",
+                    lastFailureReason = "",
+                    error = null,
                 ),
             )
             sendStatusBroadcast()
@@ -252,6 +296,7 @@ class ProxyService : Service() {
                 desiredRunning = false,
                 state = ProxyRuntimeState.Stopping,
                 message = "Stopping proxy",
+                error = null,
             ),
         )
         refreshNotification("Stopping proxy")
@@ -268,24 +313,111 @@ class ProxyService : Service() {
         val fallback = ProxyPreferences.loadConfig(this)
         return ProxyConfig(
             port = intent?.getIntExtra(EXTRA_PORT, fallback.port) ?: fallback.port,
-            advertisedBaseUrl = intent?.getStringExtra(EXTRA_ADVERTISED_BASE_URL)
-                ?.trim()
-                ?.removeSuffix("/")
-                .orEmpty()
-                .ifBlank { fallback.advertisedBaseUrl.trim().removeSuffix("/") },
-            selectedLocalAddress = intent?.getStringExtra(EXTRA_SELECTED_LOCAL_ADDRESS)
-                .orEmpty()
+            advertisedBaseUrl = intent?.getStringExtra(EXTRA_ADVERTISED_BASE_URL).orEmpty()
+                .ifBlank { fallback.advertisedBaseUrl },
+            selectedLocalAddress = intent?.getStringExtra(EXTRA_SELECTED_LOCAL_ADDRESS).orEmpty()
                 .ifBlank { fallback.selectedLocalAddress },
             debug = intent?.getBooleanExtra(EXTRA_DEBUG, fallback.debug) ?: fallback.debug,
         )
     }
 
-    private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String {
-        if (config.port !in 1..65535) {
-            throw IllegalArgumentException("Listen port must be between 1 and 65535")
+    private fun resolveAdvertisedBaseUrl(config: ProxyConfig): String =
+        ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
+
+    private fun validateConfig(config: ProxyConfig): ProxyErrorInfo? {
+        val validation = ProxyConfigValidator.validate(
+            portInput = config.port.toString(),
+            advertisedBaseUrlInput = config.advertisedBaseUrl,
+            selectedLocalAddressInput = config.selectedLocalAddress,
+            debug = config.debug,
+            localCandidates = HotspotAddressDetector.detectCandidates(),
+        )
+
+        return when {
+            validation.portError != null -> ProxyErrorInfo(
+                category = ProxyErrorCategory.INVALID_CONFIG,
+                title = "Invalid configuration",
+                detail = validation.portError,
+                recommendedAction = "Enter a listen port between 1 and 65535, then try again.",
+            )
+
+            validation.baseUrlError != null -> ProxyErrorInfo(
+                category = ProxyErrorCategory.INVALID_CONFIG,
+                title = "Invalid configuration",
+                detail = validation.baseUrlError,
+                recommendedAction = "Fix the advertised base URL or clear it to use the selected local IP.",
+            )
+
+            validation.localAddressError != null -> ProxyErrorInfo(
+                category = ProxyErrorCategory.INVALID_CONFIG,
+                title = "Invalid configuration",
+                detail = validation.localAddressError,
+                recommendedAction = "Pick one of the detected private IPv4 addresses or enter a full advertised URL.",
+            )
+
+            else -> null
         }
-        return ProxyConfigValidator.resolveEffectiveUrl(config, HotspotAddressDetector.detectCandidates())
     }
+
+    private fun classifyProcessFailure(
+        detail: String,
+        exitCode: Int? = null,
+        logTail: String = "",
+    ): ProxyErrorInfo {
+        val combined = buildString {
+            append(detail)
+            if (logTail.isNotBlank()) {
+                append('\n')
+                append(logTail)
+            }
+        }.lowercase()
+
+        return when {
+            "address already in use" in combined || "bind" in combined || "port already in use" in combined -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.PORT_IN_USE,
+                    title = "Port is already in use",
+                    detail = "Another process is already bound to the selected port.",
+                    recommendedAction = "Choose a different listen port or stop the app that is already using this port.",
+                )
+            }
+
+            "permission denied" in combined || "operation not permitted" in combined || "not allowed" in combined -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.PERMISSION_REQUIRED,
+                    title = "Permission issue",
+                    detail = "Android or the proxy process denied access needed to start cleanly.",
+                    recommendedAction = "Grant the required permission or choose a different port, then try starting the proxy again.",
+                )
+            }
+
+            exitCode != null -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.PROXY_EXIT,
+                    title = "Proxy process exited",
+                    detail = "The bundled proxy exited with code $exitCode.",
+                    recommendedAction = "Retry once. If it exits again, copy the last error and inspect the logs for more detail.",
+                )
+            }
+
+            else -> {
+                ProxyErrorInfo(
+                    category = ProxyErrorCategory.STARTUP_FAILURE,
+                    title = "Proxy failed to start",
+                    detail = detail,
+                    recommendedAction = "Try again. If the problem repeats, copy the last error and inspect the logs.",
+                )
+            }
+        }
+    }
+
+    private fun notificationPermissionError(): ProxyErrorInfo =
+        ProxyErrorInfo(
+            category = ProxyErrorCategory.PERMISSION_REQUIRED,
+            title = getString(R.string.notification_permission_required_short),
+            detail = getString(R.string.notification_permission_required_message),
+            recommendedAction = getString(R.string.notification_permission_settings_message),
+        )
 
     private fun hasNotificationPermission(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {

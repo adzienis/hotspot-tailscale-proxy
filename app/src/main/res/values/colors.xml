@@ -7,6 +7,9 @@
     <color name="proxy_panel">#FFF8EE</color>
     <color name="proxy_ink">#1E2A28</color>
     <color name="proxy_muted">#586562</color>
+    <color name="proxy_success">#2F6E47</color>
+    <color name="proxy_warning">#9A6414</color>
+    <color name="proxy_error">#A03F34</color>
     <color name="proxy_log">#16201D</color>
     <color name="proxy_log_ink">#E8F2EF</color>
     <color name="black">#000000</color>
